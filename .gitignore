@@ -1,0 +1,9 @@
+# Julia package .gitignore
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/build.log
+deps/deps.jl
+testdat_results.csv
+*.csv
+.DS_Store
