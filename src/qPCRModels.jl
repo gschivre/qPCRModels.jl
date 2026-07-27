@@ -36,11 +36,12 @@ include("datasets.jl")
 # Export public interface
 export NonLinearLeastSquare, BirchModel, LogisticModel, RichardsModel, MAK2Model
 export LevenbergMarquardt!, newtsafe_rootfinding
-export filter_kwargs, cycletreshold, hac, sdm, mad, isnoise
+export cycletreshold, hac, sdm, mad, isnoise
 export fit!, refit!, update_n!, hasamplification, hasconverged, isfitted
-export residualsJacobian, residualsJacobian!, residuals!, residuals
-export chisq, reducedchisq, get_predicted, get_params, get_linearparams, get_linearparams!
-export get_x0, get_logx0, AICc
+export residualsJacobian, residuals!, residuals
+export chisq, reducedchisq, AICc
+export get_predicted, get_params, get_linearparams, get_linearparams!
+export get_x0, get_logx0, get_cy0
 export qpcRDataset, load_qpcR_dataset, DatasetDetails
 
 end # module qPCRModels
