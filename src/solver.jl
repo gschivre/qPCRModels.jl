@@ -70,7 +70,8 @@ end
 """
     newtsafe_rootfinding(f, df, a, b; x₀ = (a + b) / 2, RFtol = 10 * eps(), RFmaxiter = 100, offset = 0.0)
 
-Globally convergent root-finding solver combining Newton-Raphson iterations with bisection bounds (Numerical Recipes in C, §9.4).
+Globally convergent root-finding solver combining Newton-Raphson iterations with bisection bounds.
+Code adapted from Press, W. H. (2007), Numerical recipes 3rd edition: The art of scientific computing, p460-461.
 
 Solves `f(x) + offset = 0` within bracket `[a, b]`. Automatically reverts to bisection step if a Newton iteration jumps outside bounds or fails to converge rapidly.
 

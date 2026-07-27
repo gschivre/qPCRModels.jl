@@ -69,6 +69,7 @@ function get_params(nlm::BirchModel)
     return (b, tₘ)
 end
 
+# Heuristics to find approriate initial value for x₀
 function _get_x0_start(b, tₘ)
     if b > 50
         return 0.5
@@ -82,7 +83,6 @@ function _get_x0_start(b, tₘ)
         return max(1e-9, min(1.0 - 1e-9, logistic(-log(2) * tₘ)))
     end
 end
-
 function _get_logx0_start(b, tₘ)
     if b > 50
         return -log(2)
@@ -160,11 +160,7 @@ function get_logx0(nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
     return z₀
 end
 
-"""
-    residualsJacobian!(r, J, nlm::BirchModel; kwargs...)
-
-Compute residuals vector `r` and Jacobian matrix `J` for `BirchModel`.
-"""
+# Compute residuals and Jacobian
 function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
     b, tₘ = get_params(nlm)
     f = let b = b
@@ -197,12 +193,12 @@ function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter
     Finv = pinv(F)
     nlm.linearparams .= Finv * nlm.data
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = 0.0
-    for j in 1:2
-        rc = dot(view(J, :, j), r)
+    rc = 0.0 # residuals coupling term
+    @views for j in 1:2
+        rc = dot(J[:, j], r)
         J[:, j] .*= nlm.linearparams[2]
-        J[:, j] .-= F.U * (F.U' * view(J, :, j))
-        J[:, j] .+= view(Finv, 2, :) * rc
+        J[:, j] .-= F.U * (F.U' * J[:, j])
+        J[:, j] .+= Finv[2, :] * rc
     end
     return nothing
 end
@@ -222,17 +218,17 @@ m = LogisticModel(data; detection_threshold = 5.0)
 mutable struct LogisticModel{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
     data::Vector{Float64}
-    σ::Float64
+    σ::Float64 # data standard deviation
     params::Vector{Float64}
     linearparams::Vector{Float64}
     chisq::Float64
     fitted::Bool
     converged::Bool
     noamp::Bool
-    xmat::Matrix{Float64}
+    xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function LogisticModel(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
-        init_params = [log(log(2)); hac(data; linear_interp = true)]
+        init_params = [log(log(2)); hac(data; linear_interp = true)] # starting rate ~ln(2)
         n = length(data)
         σ = std(data)
         noamp = isnoise(data; detection_threshold)
@@ -246,11 +242,19 @@ end
 Return non-linear parameter tuple `(a, tₘ)` where `a` is amplification rate and `tₘ` is mid-point cycle.
 """
 function get_params(nlm::LogisticModel)
-    a = exp(nlm.params[1])
+    # we could have used log(1.5 + 0.5 * p / (1 + abs(p))) to enforce 0 < a < ln(2)
+    # but the ln(2) rate would only be reached at the infinite limit
+    a = exp(nlm.params[1]) # a > 0 so rate could be higher than the perfect doubling
     tₘ = nlm.params[2]
     return (a, tₘ)
 end
 
+
+"""
+    get_linearparams!(nlm::LogisticModel)
+
+Compute linear scale and baseline offset parameters for `LogisticModel` via linear least squares on the feature matrix `xmat`.
+"""
 function get_linearparams!(nlm::LogisticModel)
     a, tₘ = get_params(nlm)
     for i in eachindex(nlm.data)
@@ -281,12 +285,13 @@ function get_logx0(nlm::LogisticModel)
     return loglogistic(-a * tₘ)
 end
 
+# Compute residuals and Jacobian
 function residualsJacobian!(r, J, nlm::LogisticModel)
     a, tₘ = get_params(nlm)
     for i in eachindex(nlm.data)
         x = logistic(a * (i - tₘ))
         nlm.xmat[i, 2] = x
-        dFinv = x * (1 - x)
+        dFinv = x * (1 - x) # use the implicit form of the logistic ODE
         J[i, 1] = (tₘ - i) * a * dFinv
         J[i, 2] = a * dFinv
     end
@@ -295,12 +300,12 @@ function residualsJacobian!(r, J, nlm::LogisticModel)
     Finv = pinv(F)
     nlm.linearparams .= Finv * nlm.data
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = 0.0
-    for j in 1:2
-        rc = dot(view(J, :, j), r)
+    rc = 0.0 # residuals coupling term
+    @views for j in 1:2
+        rc = dot(J[:, j], r)
         J[:, j] .*= nlm.linearparams[2]
-        J[:, j] .-= F.U * (F.U' * view(J, :, j))
-        J[:, j] .+= view(Finv, 2, :) * rc
+        J[:, j] .-= F.U * (F.U' * J[:, j])
+        J[:, j] .+= Finv[2, :] * rc
     end
     return nothing
 end
@@ -320,17 +325,17 @@ m = RichardsModel(data; detection_threshold = 5.0)
 mutable struct RichardsModel{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
     data::Vector{Float64}
-    σ::Float64
+    σ::Float64 # data standard deviation
     params::Vector{Float64}
     linearparams::Vector{Float64}
     chisq::Float64
     fitted::Bool
     converged::Bool
     noamp::Bool
-    xmat::Matrix{Float64}
+    xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function RichardsModel(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
-        init_params = [log(log(2)); hac(data; linear_interp = true); 0.0]
+        init_params = [log(log(2)); hac(data; linear_interp = true); 0.0] # logistic start
         n = length(data)
         σ = std(data)
         noamp = isnoise(data; detection_threshold)
@@ -366,12 +371,19 @@ end
 Return non-linear parameter tuple `(a, tₘ, ν)` for `RichardsModel`.
 """
 function get_params(nlm::RichardsModel)
-    a = exp(nlm.params[1])
+    # we could have used log(1.5 + 0.5 * p / (1 + abs(p))) to enforce 0 < a < ln(2)
+    # but the ln(2) rate would only be reached at the infinite limit
+    a = exp(nlm.params[1]) # a > 0 so rate could be higher than the perfect doubling
     tₘ = nlm.params[2]
-    ν = exp(nlm.params[3])
+    ν = exp(nlm.params[3]) # ν > 0
     return (a, tₘ, ν)
 end
 
+"""
+    get_linearparams!(nlm::RichardsModel)
+
+Compute linear scale and baseline offset parameters for `RichardsModel` via linear least squares on the feature matrix `xmat`.
+"""
 function get_linearparams!(nlm::RichardsModel)
     a, tₘ, ν = get_params(nlm)
     for i in eachindex(nlm.data)
@@ -402,13 +414,14 @@ function get_logx0(nlm::RichardsModel)
     return logRichardsLogistic(-a * tₘ, ν)
 end
 
+# Compute residuals and Jacobian
 function residualsJacobian!(r, J, nlm::RichardsModel)
     a, tₘ, ν = get_params(nlm)
     for i in eachindex(nlm.data)
         logx = logRichardsLogistic(a * (i - tₘ), ν)
         x = exp(logx)
         nlm.xmat[i, 2] = x
-        dFinv = x * (1 - x)
+        dFinv = x * (1 - x) # use the implicit form of the logistic ODE
         J[i, 1] = (tₘ - i) * a * dFinv
         J[i, 2] = a * dFinv
         J[i, 3] = ν * logx * exp(-log1mexp(ν * logx)) * dFinv
@@ -421,12 +434,12 @@ function residualsJacobian!(r, J, nlm::RichardsModel)
     Finv = pinv(F)
     nlm.linearparams .= Finv * nlm.data
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = 0.0
-    for j in 1:3
-        rc = dot(view(J, :, j), r)
+    rc = 0.0 # residuals coupling term
+    @views for j in 1:3
+        rc = dot(J[:, j], r)
         J[:, j] .*= nlm.linearparams[2]
-        J[:, j] .-= F.U * (F.U' * view(J, :, j))
-        J[:, j] .+= view(Finv, 2, :) * rc
+        J[:, j] .-= F.U * (F.U' * J[:, j])
+        J[:, j] .+= Finv[2, :] * rc
     end
     return nothing
 end
@@ -448,18 +461,18 @@ m = MAK2Model(data; detection_threshold = 5.0)
 mutable struct MAK2Model{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
     data::Vector{Float64}
-    σ::Float64
-    n::Int
+    σ::Float64 # data standard deviation
+    n::Int # last cycle included in the fit
     params::Vector{Float64}
     linearparams::Vector{Float64}
     chisq::Float64
     fitted::Bool
     converged::Bool
     noamp::Bool
-    xmat::Matrix{Float64}
+    xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function MAK2Model(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
-        ct = 4 + sdm(view(data, 4:length(data)); parabolic_interp = true)
+        ct = 4 + sdm(view(data, 4:length(data)); parabolic_interp = true) # minimum five point for model fitting
         init_params = [-log(2) * (ct + 1)]
         n::Int = floor(ct)
         σ = std(data)
@@ -474,7 +487,7 @@ end
 Get initial target concentration `x₀` from `MAK2Model`.
 """
 function get_x0(nlm::MAK2Model)
-    x₀ = exp(nlm.params[1])
+    x₀ = exp(nlm.params[1]) # x₀ > 0
     return x₀
 end
 
@@ -491,9 +504,14 @@ get_logx0(nlm::MAK2Model) = nlm.params[1]
 Return non-linear parameter `z₀ = ln(1 + x₀)` for `MAK2Model`.
 """
 function get_params(nlm::MAK2Model)
-    return log1pexp(nlm.params[1])
+    return log1pexp(nlm.params[1]) # ln(1 + x₀)
 end
 
+"""
+    get_linearparams!(nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
+
+Compute linear scale and baseline offset parameters for `MAK2Model` via linear least squares on the feature matrix `xmat`.
+"""
 function get_linearparams!(nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
     z₀ = get_params(nlm)
     f = let z₀ = z₀
@@ -512,7 +530,9 @@ function get_linearparams!(nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
 end
 get_linearparams_filtkwargs!(nlm::MAK2Model; kwargs...) = get_linearparams!(nlm; filter_kwargs(kwargs, (:RFtol, :RFmaxiter))...)
 
+# Compute residuals and Jacobian
 function residualsJacobian!(r, J, nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
+    # we use the implicit ODE, given it is autonomous this equivalent to fit the recurence relation
     z₀ = get_params(nlm)
     f = let z₀ = z₀
         z -> expinti(z) - expinti(z₀)
@@ -532,7 +552,7 @@ function residualsJacobian!(r, J, nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter 
     Finv = pinv(F)
     nlm.linearparams .= Finv * view(nlm.data, 1:nlm.n)
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = dot(J, r)
+    rc = dot(J, r) # residuals coupling term
     rmul!(J, nlm.linearparams[2])
     J .-= F.U * (F.U' * J)
     J .+= view(Finv, 2, :) * rc
@@ -545,6 +565,7 @@ end
 Update the maximum cycle count `n` considered during fitting of a `MAK2Model`.
 """
 function update_n!(nlm::MAK2Model, n::Int)
+    @assert (n > 4) "`MAK2Model` has 3 parameters (k) and AICc involves n-k-1 so n must be ≥ 5!"
     nlm.n = n
     nlm.xmat = ones(n, 2)
     nlm.params .= -log(2) * (n + 1)
@@ -562,7 +583,7 @@ Iteratively fit a `MAK2Model` over candidate cycle bounds `n` and select the cyc
 """
 function refit!(nlm::MAK2Model; kwargs...)
     out = zeros(length(nlm.data) - 4)
-    for (i, n) in Iterators.enumerate(5:length(nlm.data))
+    for (i, n) in Iterators.enumerate(5:length(nlm.data)) # MAK2Model has 3 parameters (k) and AICc involves n-k-1
         update_n!(nlm, n)
         fit!(nlm; kwargs...)
         out[i] = AICc(nlm; filter_kwargs(kwargs, (:RFtol, :RFmaxiter))...)
@@ -595,21 +616,21 @@ function fit!(nlm::NonLinearLeastSquare; fit_noise::Bool = false, kwargs...)
 end
 
 """
-    hasamplification(nlm::NonLinearLeastSquare) -> Bool
+    hasamplification(nlm::NonLinearLeastSquare)
 
 Return `true` if curve contains real amplification signal (not noise).
 """
 hasamplification(nlm::NonLinearLeastSquare) = !nlm.noamp
 
 """
-    hasconverged(nlm::NonLinearLeastSquare) -> Bool
+    hasconverged(nlm::NonLinearLeastSquare)
 
 Return `true` if the non-linear optimization solver converged cleanly.
 """
 hasconverged(nlm::NonLinearLeastSquare) = nlm.converged
 
 """
-    isfitted(nlm::NonLinearLeastSquare) -> Bool
+    isfitted(nlm::NonLinearLeastSquare)
 
 Return `true` if `fit!` has been called on model `nlm`.
 """
@@ -619,6 +640,9 @@ isfitted(nlm::NonLinearLeastSquare) = nlm.fitted
     residualsJacobian(nlm::NonLinearLeastSquare; kwargs...)
 
 Return a tuple `(r, J)` of the residual vector `r` and Jacobian matrix `J`.
+
+# Keyword Arguments
+- `scaled::Bool`: If `true`, returns residuals on standardized scale. If `false`, returns residuals on raw fluorescence scale.
 """
 function residualsJacobian(nlm::NonLinearLeastSquare; kwargs...)
     n = size(nlm.xmat, 1)
@@ -628,6 +652,16 @@ function residualsJacobian(nlm::NonLinearLeastSquare; kwargs...)
     residualsJacobian!(r, J, nlm; kwargs...)
     return (r, J)
 end
+
+"""
+    residuals(nlm::NonLinearLeastSquare, kwargs...)
+
+Compute vector of model residuals.
+
+# Keyword Arguments
+- `scaled::Bool`: If `true`, returns residuals on standardized scale. If `false`, returns residuals on raw fluorescence scale.
+"""
+residuals(nlm::NonLinearLeastSquare, kwargs...) = residuals!(zeros(size(nlm.xmat, 1)), nlm, kwargs...)
 
 """
     residuals!(r, nlm::NonLinearLeastSquare; scaled::Bool = true, kwargs...)
@@ -642,19 +676,12 @@ function residuals!(r, nlm::NonLinearLeastSquare; scaled::Bool = true, kwargs...
     for i in eachindex(r)
         r[i] = nlm.data[i]
     end
-    if scaled
+    if scaled # on the standardized scale
         return mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    else
+    else # same scale as original data
         return mul!(r, nlm.xmat, nlm.linearparams, -nlm.σ, nlm.σ)
     end
 end
-
-"""
-    residuals(nlm::NonLinearLeastSquare)
-
-Compute vector of model residuals.
-"""
-residuals(nlm::NonLinearLeastSquare) = residuals!(zeros(size(nlm.xmat, 1)), nlm)
 
 """
     chisq(nlm::NonLinearLeastSquare; kwargs...)
