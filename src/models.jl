@@ -160,6 +160,19 @@ function get_logx0(nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
     return z₀
 end
 
+"""
+    get_cy0(nlm::BirchModel)
+
+Compute the Cy₀ cycle for the `BirchModel` (see Guescini, M. et al. BMC Bioinformatics 9, 326 (2008)).
+The Cy₀ cycle is defined here as the intersection of the tangent line at the inflexion point and the baseline.
+"""
+function get_cy0(nlm::BirchModel)
+    b, tₘ = get_params(nlm)
+    xᵢ = 1 / (1 + sqrt(1 + b)) # value at the inflexion point
+    cᵢ = tₘ - b + (log(xᵢ) - (1 + b) * log1p(-xᵢ)) / log(2) # inflexion cycle
+    return cᵢ - 1 / (log(2) * xᵢ)
+end
+
 # Compute residuals and Jacobian
 function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
     b, tₘ = get_params(nlm)
@@ -283,6 +296,17 @@ Estimate log initial concentration `ln(x₀)` from fitted 4-parameter `LogisticM
 function get_logx0(nlm::LogisticModel)
     a, tₘ = get_params(nlm)
     return loglogistic(-a * tₘ)
+end
+
+"""
+    get_cy0(nlm::LogisticModel)
+
+Compute the Cy₀ cycle for the `LogisticModel` (see Guescini, M. et al. BMC Bioinformatics 9, 326 (2008)).
+The Cy₀ cycle is defined here as the intersection of the tangent line at the inflexion point and the baseline.
+"""
+function get_cy0(nlm::LogisticModel)
+    a, tₘ = get_params(nlm)
+    return tₘ - 2 / a
 end
 
 # Compute residuals and Jacobian
@@ -412,6 +436,17 @@ Estimate log initial target concentration `ln(x₀)` from fitted `RichardsModel`
 function get_logx0(nlm::RichardsModel)
     a, tₘ, ν = get_params(nlm)
     return logRichardsLogistic(-a * tₘ, ν)
+end
+
+"""
+    get_cy0(nlm::RichardsModel)
+
+Compute the Cy₀ cycle for the `RichardsModel` (see Guescini, M. et al. BMC Bioinformatics 9, 326 (2008)).
+The Cy₀ cycle is defined here as the intersection of the tangent line at the inflexion point and the baseline.
+"""
+function get_cy0(nlm::RichardsModel)
+    a, tₘ, ν = get_params(nlm)
+    return tₘ - (1 + ν + log(ν)) / a
 end
 
 # Compute residuals and Jacobian
