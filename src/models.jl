@@ -71,20 +71,7 @@ function get_params(nlm::BirchModel)
     return (b, tₘ)
 end
 
-# Heuristics to find approriate initial value for x₀
-function _get_x0_start(b, tₘ)
-    if b > 50
-        return 0.5
-    elseif b < -0.5
-        if tₘ > 0
-            return max(1e-9, exp(-log(2) * (tₘ + 1)))
-        else
-            return 1.0 - 1e-9
-        end
-    else
-        return max(1e-9, min(1.0 - 1e-9, logistic(-log(2) * tₘ)))
-    end
-end
+# Heuristics to find approriate initial value for ln(x₀)
 function _get_logx0_start(b, tₘ)
     if b > 50
         return -log(2)
@@ -120,15 +107,8 @@ get_linearparams_filtkwargs!(nlm::BirchModel; kwargs...) = get_linearparams!(nlm
 Estimate initial target concentration `x₀` (at cycle 0) from fitted `BirchModel`.
 """
 function get_x0(nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
-    b, tₘ = get_params(nlm)
-    f = let b = b
-        x -> log(x) - (1 + b) * log1p(-x)
-    end
-    df = let b = b
-        x -> 1 / x + (1 + b) / (1 - x)
-    end
-    x₀, _ = newtsafe_rootfinding(f, df, 0.0, 1.0; x₀ = _get_x0_start(b, tₘ), RFtol = RFtol, RFmaxiter = RFmaxiter, offset = log(2) * (tₘ - b))
-    return x₀
+    # solved in log space: the root finder's absolute tolerance would make x₀ inaccurate for late curves
+    return exp(get_logx0(nlm; RFtol = RFtol, RFmaxiter = RFmaxiter))
 end
 
 """
@@ -161,46 +141,58 @@ function get_cy0(nlm::BirchModel)
     return cᵢ - 1 / (log(2) * xᵢ)
 end
 
-# Fill `nlm.xmat[:, 2]` with the Birch curve, solving ln x - (1 + b) ln(1 - x) = ln(2) (c - tₘ + b) cycle by cycle,
+# Fill `nlm.xmat[:, 2]` with the Birch curve, solving z - (1 + b) ln(1 - eᶻ) = ln(2) (c - tₘ + b) for z = ln x cycle by cycle,
 # and, when `J` is given, the sensitivities of x to the non-linear parameters `(params[1], tₘ)`.
-# Once x is within rounding of 0 or 1 the curve is frozen at its last value (plateau).
+# Solving for ln x keeps the early cycles accurate in relative terms: in x, the root finder's absolute tolerance
+# swamps values below ~1e-14 (late curves), which broke the monotone bracketing between cycles.
+# Once x is within rounding of 1 the curve is frozen at its last value (plateau).
 # Returns `false` when the parameters are not representable in Float64 (e.g. b = expm1(params[1]) overflows).
 function _birch_curve!(nlm::BirchModel, J = nothing; RFtol = 10 * eps(), RFmaxiter = 100)
     b, tₘ = get_params(nlm)
     (isfinite(b) && isfinite(tₘ)) || return false
-    f = let b = b
-        x -> log(x) - (1 + b) * log1p(-x)
+    g = let b = b
+        z -> z - (1 + b) * log1mexp(z) # z < 0
     end
-    df = let b = b
-        x -> 1 / x + (1 + b) / (1 - x)
+    dg = let b = b
+        z -> 1 + (1 + b) / expm1(-z) # = 1 + (1 + b) eᶻ / (1 - eᶻ)
     end
-    sens = let b = b # from implicit differentiation; vanishes at x = 1
-        x -> x < 1 ? (dF = df(x); (-(1 + b) * (log1p(-x) + log(2)) / dF, log(2) / dF)) : (0.0, 0.0)
+    sens = let b = b # from implicit differentiation, in terms of z = ln x; vanishes at x = 1
+        function (z)
+            z < 0 || return (0.0, 0.0)
+            dF = exp(-z) - (1 + b) / expm1(z) # 1/x + (1 + b)/(1 - x)
+            return (-(1 + b) * (log1mexp(z) + log(2)) / dF, log(2) / dF)
+        end
     end
     n = length(nlm.data)
-    x, lo, xstart = 0.0, 0.0, _get_x0_start(b, tₘ)
+    target = log(2) * (1 - tₘ + b)
+    lo = min(target, 0.0) - 1.0 # g(z) ≈ z for z → -∞, step down until the cycle-1 root is bracketed
+    while g(lo) > target
+        lo = 2 * lo
+        isfinite(lo) || return false
+    end
+    z = lo
     i = 1
     while i ≤ n
-        offset = log(2) * (tₘ - b - i)
-        root_ok = (f(lo) + offset) * (f(1.0) + offset) ≤ 0
+        target = log(2) * (i - tₘ + b)
+        root_ok = g(lo) ≤ target # g(0) = +∞ so the upper bracket always holds
         if root_ok
-            xnew, _ = newtsafe_rootfinding(f, df, lo, 1.0; x₀ = xstart, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = offset)
-            root_ok = isfinite(xnew)
+            znew, _ = newtsafe_rootfinding(g, dg, lo, 0.0; x₀ = clamp(target, lo, -RFtol), RFtol = RFtol, RFmaxiter = RFmaxiter, offset = -target)
+            root_ok = isfinite(znew)
         end
         if !root_ok # next root not representable above the previous one: plateau reached in Float64
             i == 1 && return false
             break
         end
-        x = xnew
-        nlm.xmat[i, 2] = x
-        isnothing(J) || ((J[i, 1], J[i, 2]) = sens(x))
+        z = znew
+        nlm.xmat[i, 2] = exp(z)
+        isnothing(J) || ((J[i, 1], J[i, 2]) = sens(z))
         i += 1
-        (RFtol < x < 1 - RFtol) || break
-        lo = xstart = x
+        (z < -RFtol) || break # freeze on the plateau (x within rounding of 1)
+        lo = z
     end
     for j in i:n
-        nlm.xmat[j, 2] = x
-        isnothing(J) || ((J[j, 1], J[j, 2]) = sens(x))
+        nlm.xmat[j, 2] = exp(z)
+        isnothing(J) || ((J[j, 1], J[j, 2]) = sens(z))
     end
     return true
 end
@@ -719,14 +711,14 @@ function residualsJacobian(nlm::NonLinearLeastSquare; kwargs...)
 end
 
 """
-    residuals(nlm::NonLinearLeastSquare, kwargs...)
+    residuals(nlm::NonLinearLeastSquare; kwargs...)
 
 Compute vector of model residuals.
 
 # Keyword Arguments
 - `scaled::Bool`: If `true`, returns residuals on standardized scale. If `false`, returns residuals on raw fluorescence scale.
 """
-residuals(nlm::NonLinearLeastSquare, kwargs...) = residuals!(zeros(size(nlm.xmat, 1)), nlm, kwargs...)
+residuals(nlm::NonLinearLeastSquare; kwargs...) = residuals!(zeros(size(nlm.xmat, 1)), nlm; kwargs...)
 
 """
     residuals!(r, nlm::NonLinearLeastSquare; scaled::Bool = true, kwargs...)

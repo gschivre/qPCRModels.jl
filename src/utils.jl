@@ -17,7 +17,7 @@ Estimate the fractional cycle number at which fluorescence signal `x` reaches ta
 - Fractional cycle number (`Float64`), or `NaN` if `val` is never reached.
 """
 function cycletreshold(x::AbstractVector, val::Real; linear_interp::Bool = false)
-    (maximum(x) < val) && return Nan
+    (maximum(x) < val) && return NaN
     ct = findfirst(x .≥ val)
     if linear_interp && (ct > 1)
         δ = (val - x[ct]) / (x[ct] - x[ct - 1])
@@ -87,7 +87,7 @@ function sdm(x::AbstractVector; parabolic_interp::Bool = false)
     aₘ, ct = findmax(d2x)
     if parabolic_interp # use parabolic interpolation to get sub-cycle resolution
         aₘ₋₁ = (ct > 1 ? d2x[ct - 1] : 0.0) # use zero padding for the second order derivative
-        aₘ₊₁ = (ct < (n - 1) ? d2x[ct + 1] : 0.0)
+        aₘ₊₁ = (ct < n ? d2x[ct + 1] : 0.0)
         δ = 0.5 * (aₘ₋₁ - aₘ₊₁) / (aₘ₋₁ - 2 * aₘ + aₘ₊₁)
     else
         δ = 0.0
