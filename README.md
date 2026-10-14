@@ -12,7 +12,7 @@
 | `LogisticModel` | empirical (4PL) | whole curve | $a$, $t_m$ |
 | `RichardsModel` | empirical (5PL) | whole curve | $a$, $t_m$, $\nu$ |
 
-Every model has the form $F(c) = F_\mathrm{bg} + F_\mathrm{max}\, x(c)$, where $c$ is the cycle number. The baseline $F_\mathrm{bg}$ and scale $F_\mathrm{max}$ are linear parameters, eliminated by Variable Projection, so the Levenberg–Marquardt optimiser only searches over the non-linear parameters.
+Every model has the form $F(c) = F_\mathrm{bg} + F_\mathrm{max} x(c)$, where $c$ is the cycle number. The baseline $F_\mathrm{bg}$ and scale $F_\mathrm{max}$ are linear parameters, eliminated by Variable Projection, so the Levenberg–Marquardt optimiser only searches over the non-linear parameters.
 
 ## Why the Birch model?
 
@@ -50,7 +50,7 @@ During the annealing/extension step of each cycle, every single strand $A$ has t
 **H3 – Primers are the limiting resource.** Each new strand uses one primer, so $[B] = B_0 - (n - n_0)$. Defining the **carrying capacity**
 
 $$
-K = B_0 + n_0,
+K = B_0 + n_0
 $$
 
 the free primer pool is simply $[B] = K - n$. The plateau is reached when the primers are exhausted ($n \to K$).
@@ -64,19 +64,19 @@ $$
 The fraction of strands that get copied, i.e. the per-cycle efficiency, is therefore
 
 $$
-\varphi(n) = \frac{k_1 [A][B]}{k_1 [A][B] + k_2 [A]^2} = \frac{k_1 (K - n)}{k_1 (K - n) + k_2\, n}.
+\varphi(n) = \frac{k_1 [A][B]}{k_1 [A][B] + k_2 [A]^2} = \frac{k_1 (K - n)}{k_1 (K - n) + k_2 n}.
 $$
 
-**H5 – Continuous-cycle approximation.** The cycle number $c$ is treated as continuous. The mechanistic per-cycle update $n_{c+1} = (1 + E_\mathrm{max}\, \varphi)\, n_c$ is replaced by $d \ln n / dc = a\, \varphi$, where $a = \ln(1 + E_\mathrm{max})$. This package assumes perfect doubling at low template ($E_\mathrm{max} = 1$, $a = \ln 2$), as MAK2 does. See [Discrete cycles vs continuous time](#discrete-cycles-vs-continuous-time) for what this approximation does and does not change.
+**H5 – Continuous-cycle approximation.** The cycle number $c$ is treated as continuous. The mechanistic per-cycle update $n_{c+1} = (1 + E_\mathrm{max} \varphi) n_c$ is replaced by $d \ln n / dc = a \varphi$, where $a = \ln(1 + E_\mathrm{max})$. This package assumes perfect doubling at low template ($E_\mathrm{max} = 1$, $a = \ln 2$), as MAK2 does. See [Discrete cycles vs continuous time](#discrete-cycles-vs-continuous-time) for what this approximation does and does not change.
 
-**H6 – Fluorescence is proportional to product.** After extension, every strand (copied or re-annealed) sits in a duplex, so $[P] \propto n$ and $F = F_\mathrm{bg} + F_\mathrm{max}\, n/K$.
+**H6 – Fluorescence is proportional to product.** After extension, every strand (copied or re-annealed) sits in a duplex, so $[P] \propto n$ and $F = F_\mathrm{bg} + F_\mathrm{max} n/K$.
 
 ### From the scheme to the ODE
 
 Combining H4 and H5:
 
 $$
-\frac{dn}{dc} = a\, n\, \varphi(n) = \frac{a\, k_1\, n\, (K - n)}{k_1 K + (k_2 - k_1)\, n}.
+\frac{dn}{dc} = a n \varphi(n) = \frac{a k_1 n (K - n)}{k_1 K + (k_2 - k_1) n}.
 $$
 
 Dividing the numerator and denominator by $k_1$ and setting
@@ -88,13 +88,13 @@ $$
 gives the **Birch** growth equation (Birch, *Ann. Bot.* 1999):
 
 $$
-\boxed{\frac{dn}{dc} = \frac{a\, n\, (K - n)}{K + b\, n}}
+\boxed{\frac{dn}{dc} = \frac{a n (K - n)}{K + b n}}
 $$
 
 or, for the normalised quantity $x = n/K \in (0, 1)$,
 
 $$
-\frac{dx}{dc} = \frac{a\, x\, (1 - x)}{1 + b\, x}.
+\frac{dx}{dc} = \frac{a x (1 - x)}{1 + b x}.
 $$
 
 ### Discrete cycles vs continuous time
@@ -102,9 +102,9 @@ $$
 PCR runs in discrete cycles, but the Birch model is an ODE. The ODE is **autonomous**: its right-hand side depends on $n$ only, not on $c$. Two consequences follow:
 
 * **No discretisation error.** Sampled at whole cycles, the ODE solution follows *exactly* a recursion $x_{c+1} = \Phi(x_c)$, where $\Phi$ is the solution map over one cycle. $\Phi$ is the same for every cycle, so fitting the continuous solution at integer cycles is fitting a genuine cycle-to-cycle model with constant reaction conditions.
-* **Changing $a$ only rescales time.** At low template, $\Phi(x) \to (1 + E_\mathrm{max})\, x$ exactly, so $a = \ln(1 + E_\mathrm{max})$ reproduces the per-cycle efficiency of the exponential phase with no approximation.
+* **Changing $a$ only rescales time.** At low template, $\Phi(x) \to (1 + E_\mathrm{max}) x$ exactly, so $a = \ln(1 + E_\mathrm{max})$ reproduces the per-cycle efficiency of the exponential phase with no approximation.
 
-However, $\Phi$ is **not** the mechanistic update $x + E_\mathrm{max}\, \varphi(x)\, x$, and no time rescaling can make the two equal, because the required factor changes along the curve. For the logistic case ($b = 0$, $a = \ln 2$), $\Phi(x) = 2x/(1 + x)$ (the Beverton–Holt map). Its per-cycle efficiency is $(1 - x)/(1 + x)$, compared with $\varphi = 1 - x$ from the kinetic partition (1/3 vs 1/2 at half-plateau). The two agree exactly at the start (efficiency $E_\mathrm{max}$) and at the plateau (efficiency 0), and differ in between.
+However, $\Phi$ is **not** the mechanistic update $x + E_\mathrm{max} \varphi(x) x$, and no time rescaling can make the two equal, because the required factor changes along the curve. For the logistic case ($b = 0$, $a = \ln 2$), $\Phi(x) = 2x/(1 + x)$ (the Beverton–Holt map). Its per-cycle efficiency is $(1 - x)/(1 + x)$, compared with $\varphi = 1 - x$ from the kinetic partition (1/3 vs 1/2 at half-plateau). The two agree exactly at the start (efficiency $E_\mathrm{max}$) and at the plateau (efficiency 0), and differ in between.
 
 **The rate must set the time scale.** The same reasoning explains how `MAK2Model` is implemented. Instead of iterating the MAK2 recursion $x_{c+1} = x_c + \ln(1 + x_c)$, it uses the implicit solution of the ODE $dx/dc = \ln 2 \cdot \ln(1 + x)$, which is convenient for sensitivity analysis. Writing $z = \ln(1 + x)$, that solution is $\mathrm{Ei}(z) - \mathrm{Ei}(z_0) = c \ln 2$. The $\ln 2$ factor matters. Without it, the ODE grows by a factor $e$ per cycle in the exponential phase instead of 2. The fitted $x_0$ then scales as $x_0^{1/\ln 2} \approx x_0^{1.44}$, which distorts fold changes, and it is a power law, not a constant rescaling. With it, the ODE and the recursion agree in the exponential phase, and $x_0$ differs from the recursion estimate only by a constant factor ($\approx 0.55$), which cancels in fold changes.
 
@@ -115,30 +115,30 @@ The Birch curve is therefore an exact, cycle-invariant model in its own right. T
 * **$K = B_0 + n_0$**: the plateau, set by the primer supply. Since the model is fitted on $x = n/K$ and the fluorescence scale is a linear parameter, $K$ never has to be known.
 * **$a = \ln(1 + E_\mathrm{max})$**: the growth rate in early cycles, fixed to $\ln 2$. It sets the time scale and makes the early per-cycle growth exactly $1 + E_\mathrm{max}$.
 * **$b = k_2/k_1 - 1 \gt -1$**: the competition parameter, which compares re-annealing with primer annealing. Because $k_2 \ge 0$, $b \gt -1$; the code enforces this through $b = e^{p} - 1$.
-  * $b \to -1$ (no re-annealing): $dx/dc = a\, x$. The curve is purely exponential until the primers run out, then breaks sharply into the plateau.
+  * $b \to -1$ (no re-annealing): $dx/dc = a x$. The curve is purely exponential until the primers run out, then breaks sharply into the plateau.
   * $b = 0$ ($k_1 = k_2$): the classical **logistic** model, a symmetric sigmoid.
   * $b \gt 0$ (re-annealing is faster than priming): as product builds up, re-annealing increasingly wins over priming. Efficiency drops before primers are exhausted, which gives the long, asymmetric approach to the plateau seen in real qPCR curves.
 
-The $b\, x$ term in the denominator is a **density-dependent inhibition**. It is the mechanistic counterpart of the empirical asymmetry factor $\nu$ in the Richards model.
+The $b x$ term in the denominator is a **density-dependent inhibition**. It is the mechanistic counterpart of the empirical asymmetry factor $\nu$ in the Richards model.
 
 ### Closed-form (implicit) solution
 
 The variables separate. With the partial fractions
 
 $$
-\frac{1 + b x}{x (1 - x)} = \frac{1}{x} + \frac{1 + b}{1 - x},
+\frac{1 + b x}{x (1 - x)} = \frac{1}{x} + \frac{1 + b}{1 - x}
 $$
 
 integration gives
 
 $$
-\ln x - (1 + b) \ln(1 - x) = a\, c + C.
+\ln x - (1 + b) \ln(1 - x) = a c + C.
 $$
 
 The constant is fixed by $x(t_m) = 1/2$, so that $t_m$ is the half-amplification cycle. With $a = \ln 2$, this is the equation solved for each cycle in `src/models.jl`:
 
 $$
-\ln x - (1 + b) \ln(1 - x) = \ln 2\, (c - t_m + b).
+\ln x - (1 + b) \ln(1 - x) = (c - t_m + b) \ln 2.
 $$
 
 For each cycle, the equation is solved for $\ln x$ with a safeguarded Newton solver (`newtsafe_rootfinding`). Working on the log scale keeps early cycles accurate even when $x$ is below $10^{-15}$. The Jacobian comes from implicit differentiation of the same relation.
