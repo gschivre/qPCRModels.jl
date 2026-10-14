@@ -2,14 +2,18 @@ using qPCRModels
 using Documenter
 
 # The home and Birch model pages are generated from README.md so the two never drift apart.
-# GitHub inline math $`...`$ becomes Documenter inline math ``...``; ```math blocks are shared as is.
+# README math uses $$...$$ (display, on their own lines) and $...$ (inline), which GitHub renders;
+# Documenter wants ```math blocks and ``...`` inline math.
 function readme_section(readme, from, to)
     i = findfirst(from, readme)
     j = findnext(to, readme, last(i))
     return readme[first(i):prevind(readme, first(j))]
 end
-to_documenter(md) = replace(md, r"\$`(.+?)`\$" => s"``\1``",
-    "](#discrete-cycles-vs-continuous-time)" => "](@ref \"Discrete cycles vs continuous time\")")
+function to_documenter(md)
+    md = replace(md, r"^([ \t]*)\$\$\n(.*?)\n[ \t]*\$\$"ms => s"\1```math\n\2\n\1```")
+    md = replace(md, r"\$(.+?)\$" => s"``\1``")
+    return replace(md, "](#discrete-cycles-vs-continuous-time)" => "](@ref \"Discrete cycles vs continuous time\")")
+end
 
 let readme = read(joinpath(@__DIR__, "..", "README.md"), String)
     intro = readme_section(readme, "`qPCRModels.jl` is a Julia package", "## Why the Birch model?")
