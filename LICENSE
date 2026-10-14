@@ -19,3 +19,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+The MIT license above applies to the source code of qPCRModels.jl. The datasets in
+`qpcR_datasets/` are redistributed from the R package qpcR under GPL (>= 2) and are
+not covered by it; see `qpcR_datasets/README.md`.

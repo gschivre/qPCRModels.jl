@@ -184,11 +184,15 @@ qPCRModels.jl/
 │   ├── utils.jl          # Ct, HAC, SDM, noise detection
 │   └── datasets.jl       # built-in qpcR datasets
 ├── bin/qpcr_fit.jl       # CLI
-├── qpcR_datasets/        # benchmark datasets (from the R package qpcR)
+├── qpcR_datasets/        # benchmark datasets from the R package qpcR (GPL ≥ 2)
 ├── test/                 # test suite (own Project.toml)
 ├── docs/                 # Documenter.jl documentation
 └── .github/workflows/    # CI, docs, CompatHelper, TagBot
 ```
+
+## License
+
+The source code is released under the [MIT license](LICENSE). The benchmark datasets in `qpcR_datasets/` come from the R package [qpcR](https://cran.r-project.org/package=qpcR) and are distributed under its license, GPL (≥ 2); see [`qpcR_datasets/README.md`](qpcR_datasets/README.md) for their sources and citations.
 
 ## Running the tests
 
