@@ -1,6 +1,33 @@
 using qPCRModels
 using Documenter
 
+# The home and Birch model pages are generated from README.md so the two never drift apart.
+# GitHub inline math $`...`$ becomes Documenter inline math ``...``; ```math blocks are shared as is.
+function readme_section(readme, from, to)
+    i = findfirst(from, readme)
+    j = findnext(to, readme, last(i))
+    return readme[first(i):prevind(readme, first(j))]
+end
+to_documenter(md) = replace(md, r"\$`(.+?)`\$" => s"``\1``",
+    "](#discrete-cycles-vs-continuous-time)" => "](@ref \"Discrete cycles vs continuous time\")")
+
+let readme = read(joinpath(@__DIR__, "..", "README.md"), String)
+    intro = readme_section(readme, "`qPCRModels.jl` is a Julia package", "## Why the Birch model?")
+    usage = readme_section(readme, "## Installation", "## Package layout")
+    birch = readme_section(readme, "## Why the Birch model?", "## Installation")
+    write(joinpath(@__DIR__, "src", "index.md"), to_documenter("""
+        ```@meta
+        CurrentModule = qPCRModels
+        ```
+
+        # qPCRModels.jl
+
+        $(intro)See [The Birch model](@ref) for the mechanistic derivation of the default model.
+
+        $(usage)"""))
+    write(joinpath(@__DIR__, "src", "birch.md"), to_documenter("# The Birch model\n\n" * birch))
+end
+
 DocMeta.setdocmeta!(qPCRModels, :DocTestSetup, :(using qPCRModels); recursive=true)
 
 makedocs(;
