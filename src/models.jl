@@ -34,6 +34,7 @@ Uses Variable Projection (VarPro) to decouple non-linear rate/position parameter
 ```julia
 m = BirchModel(data; detection_threshold = 5.0)
 ```
+Trailing missing cycles (`NaN`) are dropped; missing values before the last measured cycle throw an `ArgumentError`.
 """
 mutable struct BirchModel{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
@@ -48,6 +49,7 @@ mutable struct BirchModel{T} <: NonLinearLeastSquare
     xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function BirchModel(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
+        data = _trim_trailing_nonfinite(data)
         init_params = [0.0; hac(data; linear_interp = true)] # logistic start
         n = length(data)
         σ = std(data)
@@ -227,6 +229,7 @@ Standard 4-parameter logistic model for qPCR curves with symmetric sigmoidal gro
 ```julia
 m = LogisticModel(data; detection_threshold = 5.0)
 ```
+Trailing missing cycles (`NaN`) are dropped; missing values before the last measured cycle throw an `ArgumentError`.
 """
 mutable struct LogisticModel{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
@@ -241,6 +244,7 @@ mutable struct LogisticModel{T} <: NonLinearLeastSquare
     xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function LogisticModel(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
+        data = _trim_trailing_nonfinite(data)
         init_params = [log(log(2)); hac(data; linear_interp = true)] # starting rate ~ln(2)
         n = length(data)
         σ = std(data)
@@ -345,6 +349,7 @@ end
 ```julia
 m = RichardsModel(data; detection_threshold = 5.0)
 ```
+Trailing missing cycles (`NaN`) are dropped; missing values before the last measured cycle throw an `ArgumentError`.
 """
 mutable struct RichardsModel{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
@@ -359,6 +364,7 @@ mutable struct RichardsModel{T} <: NonLinearLeastSquare
     xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function RichardsModel(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
+        data = _trim_trailing_nonfinite(data)
         init_params = [log(log(2)); hac(data; linear_interp = true); 0.0] # logistic start
         n = length(data)
         σ = std(data)
@@ -492,6 +498,7 @@ Models amplification based on reactant accumulation up to cut-off cycle `n`.
 ```julia
 m = MAK2Model(data; detection_threshold = 5.0)
 ```
+Trailing missing cycles (`NaN`) are dropped; missing values before the last measured cycle throw an `ArgumentError`.
 """
 mutable struct MAK2Model{T} <: NonLinearLeastSquare
     rawdata::Vector{T}
@@ -507,6 +514,7 @@ mutable struct MAK2Model{T} <: NonLinearLeastSquare
     xmat::Matrix{Float64} # matrix buffer for Variable Projection
 
     function MAK2Model(data::Vector{T}; detection_threshold::Real = 5.0) where {T}
+        data = _trim_trailing_nonfinite(data)
         ct = 4 + sdm(view(data, 4:length(data)); parabolic_interp = true) # minimum five point for model fitting
         init_params = [-log(2) * (ct + 1)]
         n::Int = floor(ct)

@@ -55,6 +55,23 @@ using qPCRModels
         @test slope ≈ 1 atol = 0.01
     end
 
+    @testset "Missing cycles" begin
+        y = qpcRDataset("boggy")[:, 2]
+        ytrunc = [y; fill(NaN, 5)] # run stopped early
+        for ModelType in (BirchModel, LogisticModel, RichardsModel, MAK2Model)
+            m = ModelType(ytrunc)
+            @test length(m.rawdata) == length(y)
+            fit!(m)
+            @test hasconverged(m)
+            ref = ModelType(y)
+            fit!(ref)
+            @test get_logx0(m) ≈ get_logx0(ref) # same fit as the curve without the missing cycles
+        end
+        ygap = copy(y); ygap[10] = NaN
+        @test_throws ArgumentError BirchModel(ygap)
+        @test_throws ArgumentError MAK2Model(fill(NaN, 40))
+    end
+
     @testset "MAK2 refit! over all windows" begin
         # windows that are pure baseline or reach the plateau used to push x₀ out of Float64 range
         y = qpcRDataset("boggy")[:, 2]

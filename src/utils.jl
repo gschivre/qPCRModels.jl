@@ -107,6 +107,15 @@ function _pinv(F::SVD{T}; atol::Real = 0, rtol::Real = (eps(real(float(oneunit(T
     return @views F.Vt[k:-1:1, :]' * Diagonal(inv.(F.S[k:-1:1])) * F.U[:,k:-1:1]'
 end
 
+# Drop trailing missing cycles (non-finite values), e.g. from runs stopped early.
+# Missing values before the last measured cycle are rejected: dropping them would shift the cycle index.
+function _trim_trailing_nonfinite(data::AbstractVector)
+    n = findlast(isfinite, data)
+    isnothing(n) && throw(ArgumentError("fluorescence data contain no finite value"))
+    all(isfinite, view(data, 1:n)) || throw(ArgumentError("fluorescence data contain missing (non-finite) values before the last measured cycle $n"))
+    return n == length(data) ? data : data[1:n]
+end
+
 """
     mad(x)
 
