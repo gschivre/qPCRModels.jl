@@ -1,9 +1,11 @@
-# Julia package .gitignore
-*.jl.cov
 *.jl.*.cov
+*.jl.cov
 *.jl.mem
+/Manifest*.toml
+/docs/Manifest*.toml
+/docs/build/
+/test/Manifest*.toml
 deps/build.log
 deps/deps.jl
-testdat_results.csv
 *.csv
 .DS_Store

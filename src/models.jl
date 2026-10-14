@@ -203,7 +203,7 @@ function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter
     end
     copyto!(r, nlm.data)
     F = svd(nlm.xmat)
-    Finv = pinv(F)
+    Finv = _pinv(F)
     nlm.linearparams .= Finv * nlm.data
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
     rc = 0.0 # residuals coupling term
@@ -321,7 +321,7 @@ function residualsJacobian!(r, J, nlm::LogisticModel)
     end
     copyto!(r, nlm.data)
     F = svd(nlm.xmat)
-    Finv = pinv(F)
+    Finv = _pinv(F)
     nlm.linearparams .= Finv * nlm.data
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
     rc = 0.0 # residuals coupling term
@@ -466,7 +466,7 @@ function residualsJacobian!(r, J, nlm::RichardsModel)
     end
     copyto!(r, nlm.data)
     F = svd(nlm.xmat)
-    Finv = pinv(F)
+    Finv = _pinv(F)
     nlm.linearparams .= Finv * nlm.data
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
     rc = 0.0 # residuals coupling term
@@ -548,43 +548,55 @@ end
 Compute linear scale and baseline offset parameters for `MAK2Model` via linear least squares on the feature matrix `xmat`.
 """
 function get_linearparams!(nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
-    z₀ = get_params(nlm)
-    f = let z₀ = z₀
-        z -> expinti(z) - expinti(z₀)
+    if _mak2_curve!(nlm, get_params(nlm); RFtol = RFtol, RFmaxiter = RFmaxiter)
+        nlm.linearparams .= nlm.xmat \ view(nlm.data, 1:nlm.n)
+    else
+        nlm.linearparams .= NaN
     end
-    df = z -> exp(z) / z
-    fz₀ = f(z₀)
-    z, _ = newtsafe_rootfinding(f, df, z₀, log1pexp(1 + logexpm1(z₀)); x₀ = z₀, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = -(1 + fz₀))
-    nlm.xmat[1, 2] = expm1(z)
-    for i in 2:nlm.n
-        z, _ = newtsafe_rootfinding(f, df, z, log1pexp(i + logexpm1(z₀)); x₀ = z, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = -(i + fz₀))
-        nlm.xmat[i, 2] = expm1(z)
-    end
-    nlm.linearparams .= nlm.xmat \ view(nlm.data, 1:nlm.n)
     return nlm.linearparams
 end
 get_linearparams_filtkwargs!(nlm::MAK2Model; kwargs...) = get_linearparams!(nlm; filter_kwargs(kwargs, (:RFtol, :RFmaxiter))...)
 
-# Compute residuals and Jacobian
-function residualsJacobian!(r, J, nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
-    # we use the implicit ODE, given it is autonomous this equivalent to fit the recurence relation
-    z₀ = get_params(nlm)
+# Fill `nlm.xmat[:, 2]` with the MAK2 curve: we use the implicit solution of the ODE dx/dc = ln(2) ln(1 + x),
+# i.e. Ei(z) - Ei(z₀) = ln(2) c with z = ln(1 + x).
+# The ln(2) time scale makes the exponential phase double each cycle, as the MAK2 recursion x + ln(1 + x) does,
+# so x₀ only differs from the recursion estimate by a constant factor (fold changes are preserved).
+# Returns `false` when the curve is not representable in Float64 for this z₀ (Ei overflow or catastrophic
+# cancellation for large z₀, underflow of z₀ to 0), which happens for absurd x₀ on non-amplifying windows.
+function _mak2_curve!(nlm::MAK2Model, z₀; RFtol = 10 * eps(), RFmaxiter = 100)
+    ((z₀ > 0) && isfinite(expinti(z₀))) || return false
     f = let z₀ = z₀
         z -> expinti(z) - expinti(z₀)
     end
     df = z -> exp(z) / z
-    fz₀ = f(z₀)
-    z, _ = newtsafe_rootfinding(f, df, z₀, log1pexp(1 + logexpm1(z₀)); x₀ = z₀, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = -(1 + fz₀))
-    nlm.xmat[1, 2] = expm1(z)
-    J[1] = -expm1(z₀) * z / z₀
-    for i in 2:nlm.n
-        z, _ = newtsafe_rootfinding(f, df, z, log1pexp(i + logexpm1(z₀)); x₀ = z, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = -(i + fz₀))
+    lxm₀ = logexpm1(z₀)
+    z = z₀
+    for i in 1:nlm.n
+        offset = -log(2) * i
+        hi = log1pexp(log(2) * (i + 1) + lxm₀) # x(c) ≤ x₀ 2ᶜ, one extra doubling keeps the root strictly inside
+        flo, fhi = f(z) + offset, f(hi) + offset
+        (isfinite(fhi) && (flo * fhi ≤ 0)) || return false # also false when NaN
+        z, _ = newtsafe_rootfinding(f, df, z, hi; x₀ = z, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = offset)
         nlm.xmat[i, 2] = expm1(z)
-        J[i] = -expm1(z₀) * z / z₀
+    end
+    return true
+end
+
+# Compute residuals and Jacobian
+function residualsJacobian!(r, J, nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
+    z₀ = get_params(nlm)
+    if !_mak2_curve!(nlm, z₀; RFtol = RFtol, RFmaxiter = RFmaxiter)
+        # trial step outside floating-point range: infinite χ² makes LevenbergMarquardt! reject it
+        fill!(r, Inf)
+        fill!(J, 0.0)
+        return nothing
+    end
+    for i in 1:nlm.n
+        J[i] = -expm1(z₀) * log1p(nlm.xmat[i, 2]) / z₀
     end
     copyto!(r, view(nlm.data, 1:nlm.n))
     F = svd(nlm.xmat)
-    Finv = pinv(F)
+    Finv = _pinv(F)
     nlm.linearparams .= Finv * view(nlm.data, 1:nlm.n)
     mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
     rc = dot(J, r) # residuals coupling term

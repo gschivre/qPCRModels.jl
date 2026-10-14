@@ -42,4 +42,26 @@ using qPCRModels
             @test length(get_predicted(m)) > 0
         end
     end
+
+    @testset "MAK2 x₀ proportional to template on recursion data" begin
+        # noise-free curves from the MAK2 recursion xₙ = xₙ₋₁ + ln(1 + xₙ₋₁) for a 4-fold dilution series
+        x0s = 1e-3 ./ 4.0 .^ (0:4)
+        logx0 = map(x0s) do x0
+            m = MAK2Model(1.0 .+ 10.0 .* accumulate((x, _) -> x + log1p(x), 1:40; init = x0))
+            fit!(m)
+            get_logx0(m)
+        end
+        slope = ([ones(5) log.(x0s)] \ logx0)[2]
+        @test slope ≈ 1 atol = 0.01
+    end
+
+    @testset "MAK2 refit! over all windows" begin
+        # windows that are pure baseline or reach the plateau used to push x₀ out of Float64 range
+        y = qpcRDataset("boggy")[:, 2]
+        m = MAK2Model(y)
+        aicc = refit!(m)
+        @test isfitted(m)
+        @test any(isfinite, aicc)
+        @test isfinite(get_logx0(m))
+    end
 end

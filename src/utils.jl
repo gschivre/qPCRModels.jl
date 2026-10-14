@@ -95,13 +95,14 @@ function sdm(x::AbstractVector; parabolic_interp::Bool = false)
     return ct + δ # type stable
 end
 
-# Add a method to compute the pseudo inverse from SVD factorization (in LinearAlgebra but not exported)
+# Pseudo-inverse (as a matrix) from an SVD factorization.
+# Kept private: extending `LinearAlgebra.pinv(::SVD)` clashes with the method LinearAlgebra itself defines in recent Julia versions.
 function _count_svdvals(S, atol::Real, rtol::Real)
     isempty(S) && return 0
     tol = max(rtol * S[1], atol)
     return iszero(S[1]) ? 0 : searchsortedlast(S, tol, rev = true)
 end
-function LinearAlgebra.pinv(F::SVD{T}; atol::Real = 0, rtol::Real = (eps(real(float(oneunit(T))))*min(size(F)...)) * iszero(atol)) where {T}
+function _pinv(F::SVD{T}; atol::Real = 0, rtol::Real = (eps(real(float(oneunit(T))))*min(size(F)...)) * iszero(atol)) where {T}
     k = _count_svdvals(F.S, atol, rtol)
     return @views F.Vt[k:-1:1, :]' * Diagonal(inv.(F.S[k:-1:1])) * F.U[:,k:-1:1]'
 end

@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+qPCRModels = "7a41eb93-6c84-4824-9b16-654cf60fb925"
+
+[sources]
+qPCRModels = {path = ".."}
