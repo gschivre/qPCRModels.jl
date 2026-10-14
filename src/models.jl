@@ -105,25 +105,11 @@ end
 Compute linear scale and baseline offset parameters for `BirchModel` via linear least squares on the feature matrix `xmat`.
 """
 function get_linearparams!(nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
-    b, tₘ = get_params(nlm)
-    f = let b = b
-        x -> log(x) - (1 + b) * log1p(-x)
+    if _birch_curve!(nlm; RFtol = RFtol, RFmaxiter = RFmaxiter)
+        nlm.linearparams .= nlm.xmat \ nlm.data
+    else
+        nlm.linearparams .= NaN
     end
-    df = let b = b
-        x -> 1 / x + (1 + b) / (1 - x)
-    end
-    x, _ = newtsafe_rootfinding(f, df, 0.0, 1.0; x₀ = _get_x0_start(b, tₘ), RFtol = RFtol, RFmaxiter = RFmaxiter, offset = log(2) * (tₘ - b - 1))
-    nlm.xmat[1, 2] = x
-    i = 2
-    while (i ≤ length(nlm.data)) && (RFtol < x < (1 - RFtol))
-        x, _ = newtsafe_rootfinding(f, df, x, 1.0; x₀ = x, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = log(2) * (tₘ - b - i))
-        nlm.xmat[i, 2] = x
-        i += 1
-    end
-    for j in i:length(nlm.data)
-        nlm.xmat[j, 2] = x
-    end
-    nlm.linearparams .= nlm.xmat \ nlm.data
     return nlm.linearparams
 end
 get_linearparams_filtkwargs!(nlm::BirchModel; kwargs...) = get_linearparams!(nlm; filter_kwargs(kwargs, (:RFtol, :RFmaxiter))...)
@@ -175,33 +161,57 @@ function get_cy0(nlm::BirchModel)
     return cᵢ - 1 / (log(2) * xᵢ)
 end
 
-# Compute residuals and Jacobian
-function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
+# Fill `nlm.xmat[:, 2]` with the Birch curve, solving ln x - (1 + b) ln(1 - x) = ln(2) (c - tₘ + b) cycle by cycle,
+# and, when `J` is given, the sensitivities of x to the non-linear parameters `(params[1], tₘ)`.
+# Once x is within rounding of 0 or 1 the curve is frozen at its last value (plateau).
+# Returns `false` when the parameters are not representable in Float64 (e.g. b = expm1(params[1]) overflows).
+function _birch_curve!(nlm::BirchModel, J = nothing; RFtol = 10 * eps(), RFmaxiter = 100)
     b, tₘ = get_params(nlm)
+    (isfinite(b) && isfinite(tₘ)) || return false
     f = let b = b
         x -> log(x) - (1 + b) * log1p(-x)
     end
     df = let b = b
         x -> 1 / x + (1 + b) / (1 - x)
     end
-    x, _ = newtsafe_rootfinding(f, df, 0.0, 1.0; x₀ = _get_x0_start(b, tₘ), RFtol = RFtol, RFmaxiter = RFmaxiter, offset = log(2) * (tₘ - b - 1))
-    nlm.xmat[1, 2] = x
-    dF = df(x)
-    J[1, 1] = -(1 + b) * (log1p(-x) + log(2)) / dF
-    J[1, 2] = log(2) / dF
-    i = 2
-    while (i ≤ length(nlm.data)) && (RFtol < x < (1 - RFtol))
-        x, _ = newtsafe_rootfinding(f, df, x, 1.0; x₀ = x, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = log(2) * (tₘ - b - i))
-        nlm.xmat[i, 2] = x
-        dF = df(x)
-        J[i, 1] = -(1 + b) * (log1p(-x) + log(2)) / dF
-        J[i, 2] = log(2) / dF
-        i += 1
+    sens = let b = b # from implicit differentiation; vanishes at x = 1
+        x -> x < 1 ? (dF = df(x); (-(1 + b) * (log1p(-x) + log(2)) / dF, log(2) / dF)) : (0.0, 0.0)
     end
-    for j in i:length(nlm.data)
+    n = length(nlm.data)
+    x, lo, xstart = 0.0, 0.0, _get_x0_start(b, tₘ)
+    i = 1
+    while i ≤ n
+        offset = log(2) * (tₘ - b - i)
+        root_ok = (f(lo) + offset) * (f(1.0) + offset) ≤ 0
+        if root_ok
+            xnew, _ = newtsafe_rootfinding(f, df, lo, 1.0; x₀ = xstart, RFtol = RFtol, RFmaxiter = RFmaxiter, offset = offset)
+            root_ok = isfinite(xnew)
+        end
+        if !root_ok # next root not representable above the previous one: plateau reached in Float64
+            i == 1 && return false
+            break
+        end
+        x = xnew
+        nlm.xmat[i, 2] = x
+        isnothing(J) || ((J[i, 1], J[i, 2]) = sens(x))
+        i += 1
+        (RFtol < x < 1 - RFtol) || break
+        lo = xstart = x
+    end
+    for j in i:n
         nlm.xmat[j, 2] = x
-        J[j, 1] = -(1 + b) * (log1p(-x) + log(2)) / dF
-        J[j, 2] = log(2) / dF
+        isnothing(J) || ((J[j, 1], J[j, 2]) = sens(x))
+    end
+    return true
+end
+
+# Compute residuals and Jacobian
+function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
+    if !_birch_curve!(nlm, J; RFtol = RFtol, RFmaxiter = RFmaxiter)
+        # trial step outside floating-point range: infinite χ² makes LevenbergMarquardt! reject it
+        fill!(r, Inf)
+        fill!(J, 0.0)
+        return nothing
     end
     copyto!(r, nlm.data)
     F = svd(nlm.xmat)

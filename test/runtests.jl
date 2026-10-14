@@ -72,6 +72,18 @@ using qPCRModels
         @test_throws ArgumentError MAK2Model(fill(NaN, 40))
     end
 
+    @testset "Drifting curves that pass isnoise do not crash" begin
+        # smooth baseline drift without amplification: LM used to step out of Float64 range (Birch)
+        # or hit an exactly singular damped Hessian (Richards)
+        col(name, c) = (d = qpcRDataset(name); d[:, findfirst(==(c), d.colnames)])
+        for (name, c, ModelType) in (("htPCR", "P48.W12", BirchModel), ("vermeulen1", "CPSG3.1495", BirchModel),
+                                     ("htPCR", "P67.W91", RichardsModel))
+            m = ModelType(col(name, c))
+            fit!(m)
+            @test isfitted(m)
+        end
+    end
+
     @testset "MAK2 refit! over all windows" begin
         # windows that are pure baseline or reach the plateau used to push x₀ out of Float64 range
         y = qpcRDataset("boggy")[:, 2]

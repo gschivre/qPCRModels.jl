@@ -44,7 +44,12 @@ function LevenbergMarquardt!(nlm::NonLinearLeastSquare; LMtol = 1e-8, LMtol_chis
             H[i, i] += min(max(λ * H[i, i], min_damping), max_dampening)
         end
         mul!(g, J', r)
-        Δ .= H \ g
+        HF = lu!(H; check = false)
+        if !issuccess(HF) # damping lost to rounding (e.g. collinear Jacobian columns): retry with stronger damping
+            λ *= λinc
+            continue
+        end
+        ldiv!(Δ, HF, g)
         p .-= Δ
         residualsJacobian!(r_new, J_new, nlm; kwargs...) # new residuals & Jacobian
         chisq_new = sum(abs2, r_new)
