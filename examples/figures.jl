@@ -56,6 +56,28 @@ rowsize!(fig.layout, 2, Relative(1 / 3))
 rowgap!(fig.layout, 8)
 save(joinpath(ASSETS, "fit_example.png"), fig; px_per_unit = 2)
 
+### Figure 3: extrapolation of the same curve back to cycle 0, on a log scale
+
+mB, mR = fits["Birch"][j], fits["Richards"][j]
+c = 0:length(y)
+log10xB = [get_logx0(mB); log.(mB.xmat[:, 2])] ./ log(10)
+a, tₘ, ν = get_params(mR)
+log10xR = [qPCRModels.logRichardsLogistic(a * (ci - tₘ), ν) for ci in c] ./ log(10)
+F_bg, F_max = mB.σ .* mB.linearparams
+xdata = (y .- F_bg) ./ F_max # data on the Birch scale; baseline noise is only shown where positive
+fig = Figure(; size = (1000, 550), fontsize = 16)
+ax3 = Axis(fig[1, 1]; xlabel = "Cycle", ylabel = L"\log_{10}(x)", title = "Curve $(names[j]): extrapolation to cycle 0")
+pos = xdata .> 0
+scatter!(ax3, cycles[pos], log10.(xdata[pos]); color = :black, markersize = 9, label = "Data (Birch baseline and scale)")
+for (name, l) in (("Birch", log10xB), ("Richards", log10xR))
+    m = fits[name][j]
+    lines!(ax3, c, l; color = COLORS[name], linestyle = LINESTYLES[name], linewidth = 2,
+           label = "$name, log₁₀ x₀ = $(round(get_logx0(m) / log(10); digits = 1))")
+end
+ylims!(ax3, -12, 0.5)
+axislegend(ax3; position = :rb)
+save(joinpath(ASSETS, "extrapolation_example.png"), fig; px_per_unit = 2)
+
 ### Figure 2: log₁₀ x₀ against the dilution, for each model
 
 fig = Figure(; size = (1200, 700), fontsize = 16)

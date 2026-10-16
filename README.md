@@ -167,8 +167,30 @@ If $x_0$ is estimated correctly, $\log_{10} x_0$ against $\log_{10}$ of the rela
 
 * **Birch** gives the slope closest to 1 and the smallest spread between replicates.
 * **Logistic** gives a slope close to 1, but with a much larger spread, especially at the lowest template amount.
-* **MAK2** uses only the start of the curve, so its estimates are noisier and its slope is below 1.
-* **Richards** cannot be used to estimate $x_0$: the asymmetry parameter makes the extrapolation to cycle 0 unstable, so the values are meaningless.
+* **MAK2** uses only the start of the curve, so its estimates are noisier.
+* **Richards** cannot be used to estimate $x_0$: its values are meaningless (see below).
+
+### Why the Richards model fails
+
+The Birch and Richards (5PL) curves both add one shape parameter to the logistic curve, but in different ways (Birch 1999 compares the two equations). The Richards curve used here, $x = \left(1 + e^{-a(c - t_m)}\right)^{-1/\nu}$ with $\nu \gt 0$, solves
+
+$$
+\frac{dx}{dc} = \frac{a}{\nu} x (1 - x^\nu).
+$$
+
+**The early growth rate is free.** At low template, the Richards growth rate per cycle is $d \ln x / dc \to a/\nu$. The data cannot fix this rate, because the exponential phase is hidden in the baseline noise. But $\nu$ also sets the shape of the visible part of the curve, so the fit chooses $\nu$ for the visible part only. On `dil4reps94`, the fits push $\nu$ towards 0 (median 0.03), which gives a median $a/\nu$ of 11.5: a $10^5$-fold increase per cycle instead of the 2-fold of PCR. Extrapolating back to cycle 0 at that rate gives a median $\log_{10} x_0$ of −100, and values below −3000.
+
+In the Birch model, $d \ln x / dc \to a = \ln 2$ for any $b$. The exponential phase is perfect doubling by construction, so going back to cycle 0 only counts doublings, and $b$ only shapes the slowdown towards the plateau.
+
+![Birch and Richards fits of one curve extrapolated to cycle 0, on a log scale](docs/src/assets/extrapolation_example.png)
+
+On a log scale, the Birch curve is a straight line with slope $\log_{10} 2$ per cycle until the slowdown; the Richards curve falls almost vertically below the measured range. The data are shown with the Birch baseline and scale; below about 1% of the plateau the signal is lost in the baseline noise.
+
+**The inflection point is restricted.** The Richards inflection point is at $x_i = (1 + \nu)^{-1/\nu}$. For $\nu \gt 0$ it is always above $1/e \approx 0.37$ of the plateau. The Birch inflection point, $x_i = 1/\left(1 + \sqrt{1 + b}\right)$, can be anywhere in $(0, 1)$. (On `dil4reps94` the Birch inflection is at 0.41–0.44 of the plateau, inside the Richards range, so this limit is not the cause of the failure there.)
+
+**The limit $\nu \to 0$ is the Gompertz curve**, $dx/dc = -a x \ln x$, with its inflection point at exactly $1/e$. Its growth rate per cycle, $-a \ln x$, has no upper bound as $x \to 0$: at low template the curve grows faster than any exponential. The cycle where it reaches half of the plateau depends on $\ln \ln (1/x_0)$ instead of $\ln x_0$: with $a = 0.3$, a 10-fold dilution delays it by only 0.4–0.5 cycle instead of $\log_2 10 \approx 3.3$ cycles. Most Richards fits on `dil4reps94` are close to this limit.
+
+**Below $1/e$, amplification without template.** The Richards family can put the inflection point below $1/e$ only with $-1 \lt \nu \lt 0$ (not allowed in `RichardsModel`). Near $x = 0$, the growth rate then behaves as $x^{1 + \nu}$, with an exponent below 1. So a curve starting from $x = 0$ does not have to stay at 0: the model allows amplification without any template, in a finite number of cycles. The Birch model never does this: its growth rate $a x (1 - x)/(1 + b x)$ is proportional to $x$ near 0, for any inflection point.
 
 ## Installation
 
