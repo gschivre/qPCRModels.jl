@@ -2,6 +2,8 @@ using Test
 using qPCRModels
 using qPCRModels: RichardsLogistic
 using LogExpFunctions: logistic, log1mexp
+using Random
+using Statistics
 
 # Exact Birch curve: bisection on the implicit solution ln x - (1 + b) ln(1 - x) = ln(2) (c - tₘ + b).
 # Independent of the package root finder, so it can serve as ground truth.
@@ -77,6 +79,12 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         x, _ = newtsafe_rootfinding(x -> x^2, x -> 2x, 0.0, 2.0; offset = -3.0) # solves x² = 3
         @test x ≈ sqrt(3)
         @test_throws AssertionError newtsafe_rootfinding(x -> x^2 + 1, x -> 2x, 0.0, 2.0)
+        # root within one ulp of a large bracket end (MAK2 trial step): used to spin until RFmaxiter, as eps(z) > RFtol
+        z₀ = 38.617540143048885
+        z, converged = @test_logs newtsafe_rootfinding(z -> qPCRModels.expinti(z) - qPCRModels.expinti(z₀), z -> exp(z) / z, z₀, 42.8; x₀ = z₀, offset = -5 * log(2))
+        @test converged && (z ≈ z₀)
+        x, converged = @test_logs newtsafe_rootfinding(x -> x^2 - 2, x -> 2x, 0.0, 2.0; RFtol = 0.0) # to machine precision
+        @test converged && (x ≈ sqrt(2))
 
         m = BirchModel(qpcRDataset("batsch1")[:, 2])
         chisq_lm, converged = @test_logs (:warn, "Reached maximum number of iterations") match_mode = :any LevenbergMarquardt!(m; LMmaxiter = 1)
@@ -274,6 +282,109 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test_throws ArgumentError MAK2Model(fill(NaN, 40))
     end
 
+    @testset "Standard errors" begin
+        y = qpcRDataset("dil4reps94")[:, 2]
+        for ModelType in ALL_MODELS
+            m = ModelType(y)
+            @test all(isnan, get_stderrors(m)) # not fitted
+            fit!(m)
+            se = get_stderrors(m)
+            @test keys(se) == (qPCRModels._param_names(m)..., :F_bg, :F_max, :logx0)
+            @test all(s -> isfinite(s) && s > 0, se)
+            # analytic gradient of ln x₀ against central differences
+            p = copy(m.params)
+            g = map(eachindex(p)) do k
+                h = 1e-6 * max(1, abs(p[k]))
+                m.params .= p; m.params[k] += h; up = get_logx0(m)
+                m.params .= p; m.params[k] -= h; dn = get_logx0(m)
+                (up - dn) / 2h
+            end
+            m.params .= p
+            @test qPCRModels._logx0_gradient(m) ≈ g rtol = 1e-6
+        end
+        # standard errors match the spread of refits on curves simulated around the fit
+        m = BirchModel(y)
+        fit!(m)
+        ŷ, s = get_predicted(m; scaled = false), m.σ * sqrt(reducedchisq(m))
+        rng = MersenneTwister(1)
+        sims = map(1:300) do _
+            mm = BirchModel(ŷ .+ s .* randn(rng, length(ŷ)))
+            fit!(mm)
+            (get_params(mm)..., (mm.σ .* mm.linearparams)..., get_logx0(mm))
+        end
+        se = get_stderrors(m)
+        for (k, name) in enumerate(keys(se))
+            @test std(getindex.(sims, k)) ≈ se[name] rtol = 0.2
+        end
+    end
+
+    @testset "Calibration curve" begin
+        q = repeat(10.0 .^ (1:5); inner = 3)
+        y = -6 .+ log10.(q) .+ 0.01 .* sin.(1:15) # log₁₀ x₀ with small deterministic scatter
+        y[4] += 1.5 # outlier
+        cal = calibration(q, exp10.(y))
+        @test cal.slope ≈ 1 atol = 0.01
+        @test cal.intercept ≈ -6 atol = 0.03
+        @test cal.weights[4] == 0 && all(>(0.5), cal.weights[[1:3; 5:15]])
+        @test cal.slope_se > 0 && cal.intercept_se > 0 && cal.converged
+        ols = calibration(q, exp10.(y); robust = false)
+        @test abs(ols.slope - 1) > abs(cal.slope - 1) # pulled by the outlier
+        @test all(==(1), ols.weights)
+        fixed = calibration(q, exp10.(y); fixed_slope = true)
+        @test fixed.slope == 1 && fixed.slope_se == 0
+        @test fixed.intercept ≈ -6 atol = 0.03
+        @test quantify(cal, exp10(cal.intercept + cal.slope * log10(250.0))) ≈ 250
+        # perfect line: zero MAD must not give NaN weights
+        exact = calibration(q, exp10.(-6 .+ log10.(q)))
+        @test exact.slope ≈ 1 && all(==(1), exact.weights)
+
+        x0 = exp10.(y)
+        x0[2] = NaN
+        x0[3] = 0.0
+        @test calibration(q, x0).used == [i ∉ (2, 3) for i in 1:15]
+        @test_throws DimensionMismatch calibration(q[1:3], x0)
+        @test_throws ArgumentError calibration(-q, x0)
+        @test_throws ArgumentError calibration(fill(10.0, 15), x0) # a single quantity
+        @test_throws ArgumentError calibration(q[1:2], x0[1:2])
+
+        # from fitted models: unconverged models are left out
+        ds = qpcRDataset("dil4reps94")
+        cols = [findfirst(==("$(g)_$(r)"), ds.colnames) for g in ("F15", "F150", "F1500", "F15000") for r in 1:5]
+        models = [BirchModel(ds[:, j]) for j in cols]
+        foreach(fit!, models[2:end])
+        rel = [1 / parse(Int, split(ds.colnames[j], "_")[1][2:end]) for j in cols] # F15 holds the most template
+        cal = calibration(rel, models)
+        @test !cal.used[1] && all(cal.used[2:end])
+        @test cal.slope ≈ 1 atol = 0.05
+        @test quantify(cal, models[end]) ≈ rel[end] rtol = 0.3
+    end
+
+    @testset "Display" begin
+        y = qpcRDataset("dil4reps94")[:, 2]
+        plain(x) = sprint(show, MIME"text/plain"(), x)
+        for ModelType in ALL_MODELS
+            m = ModelType(y)
+            @test occursin("not fitted", plain(m))
+            @test occursin("not fitted", sprint(show, m))
+            fit!(m)
+            txt = plain(m)
+            @test startswith(txt, string(nameof(ModelType), " · ")) && occursin("converged", txt)
+            @test occursin("log₁₀ x₀", txt) && occursin("RSE = ", txt)
+            # the first digits of the values line up
+            lines = filter(l -> occursin(" ± ", l), split(txt, "\n"))
+            @test length(unique(textwidth(l[1:prevind(l, findfirst(isdigit, l[3:end]) + 2)]) for l in lines)) == 1
+            @test sprint(show, m) == string(nameof(ModelType), "(", sprint(show, m)[length(string(nameof(ModelType))) + 2:end])
+            @test endswith(sprint(show, m), "converged)")
+        end
+        @test occursin("no amplification", plain(BirchModel(1.0 .+ 0.01 .* sin.(7.3 .* (1:40)))))
+        q = repeat(10.0 .^ (1:5); inner = 3)
+        cal = calibration(q, exp10.(-6 .+ log10.(q) .+ 0.01 .* sin.(1:15)))
+        txt = plain(cal)
+        @test occursin("robust", txt) && occursin("15 points (0 outliers)", txt) && occursin("slope", txt)
+        @test !any(startswith("  slope"), split(plain(calibration(q, exp10.(-6 .+ log10.(q)); fixed_slope = true)), "\n"))
+        @test startswith(sprint(show, cal), "CalibrationCurve(slope = ")
+    end
+
     @testset "Drifting curves that pass isnoise do not crash" begin
         # smooth baseline drift without amplification: LM used to step out of Float64 range (Birch)
         # or hit an exactly singular damped Hessian (Richards)
@@ -283,5 +394,72 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             fit!(m)
             @test isfitted(m)
         end
+    end
+
+    @testset "Command-line interface" begin
+        script = joinpath(pkgdir(qPCRModels), "bin", "qpcr_fit.jl")
+        cli = Module(:CLI)
+        Base.include(cli, script) # main() only runs when the script is the program
+        @test cli.parse_args(["boggy"])[:input] == "boggy"
+        opts = cli.parse_args(["data.csv", "-m", "MAK2", "--output", "out.csv", "--fit-noise"])
+        @test opts[:model] == "mak2" && opts[:output] == "out.csv" && opts[:fit_noise]
+        @test cli.parse_args(["-h"])[:help]
+        @test_throws ErrorException cli.parse_args(["a", "b"])
+        @test_throws ErrorException cli.parse_args(["a", "--bogus"])
+        @test_throws ErrorException cli.parse_args(["a", "-m"])
+        @test_throws ErrorException cli.parse_args(["a", "-o"])
+
+        dir = mktempdir()
+        amp = 1.0 .+ 10.0 .* logistic.(0.6 .* ((1:40) .- 22.0)) .+ 0.01 .* sin.(3.1 .* (1:40))
+        flat = 1.0 .+ 0.01 .* sin.(7.3 .* (1:40))
+        for (delim, ext) in (('\t', "tsv"), (',', "csv"), (';', "txt"), (' ', "dat"))
+            path = joinpath(dir, "curves.$ext")
+            write(path, join(["Cycle", "A", "B"], delim) * "\n" * join((join((c, amp[c], flat[c]), delim) for c in 1:40), "\n") * "\n\n")
+            colnames, data = cli.load_custom_file(path)
+            @test colnames == ["Cycle", "A", "B"]
+            @test size(data) == (40, 3) && data[:, 2] ≈ amp # blank trailing line ignored
+        end
+        short = joinpath(dir, "short.csv")
+        write(short, "Cycle,A\n1,2.0\n2\n")
+        @test_throws ErrorException cli.load_custom_file(short)
+        @test_throws ErrorException cli.load_custom_file(joinpath(dir, "missing.csv"))
+        empty = joinpath(dir, "empty.csv")
+        write(empty, "\n")
+        @test_throws ErrorException cli.load_custom_file(empty)
+
+        # end-to-end runs in a separate process, with the test environment
+        function run_cli(args...)
+            out, err = IOBuffer(), IOBuffer()
+            cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script $args`
+            p = run(pipeline(ignorestatus(cmd); stdout = out, stderr = err))
+            return (code = p.exitcode, out = String(take!(out)), err = String(take!(err)))
+        end
+        res = run_cli("--help")
+        @test res.code == 0 && occursin("Usage:", res.out)
+        res = run_cli("boggy", "--model", "nope")
+        @test res.code == 1 && occursin("Invalid model 'nope'", res.err)
+        res = run_cli("boggy", "--bogus")
+        @test res.code == 1 && occursin("Unknown option: --bogus", res.err)
+        res = run_cli(joinpath(dir, "missing.csv"))
+        @test res.code == 1 && occursin("File not found", res.err)
+
+        csv = joinpath(dir, "boggy.csv")
+        res = run_cli("boggy", "-o", csv)
+        @test res.code == 0 && occursin("Built-in Dataset: boggy", res.out) && occursin("Results successfully saved", res.out)
+        rows = readlines(csv)
+        @test rows[1] == "Curve,Status,x0,log_x0,AICc,Reduced_Chisq"
+        @test length(rows) == size(qpcRDataset("boggy"), 2) # header + one row per curve
+        fields = split(rows[2], ',')
+        @test fields[1] == "F1.1" && fields[2] == "Converged"
+        ref = BirchModel(qpcRDataset("boggy")[:, 2])
+        fit!(ref)
+        @test parse(Float64, fields[4]) ≈ get_logx0(ref) atol = 1e-5 # same fit as the package
+
+        csv = joinpath(dir, "custom.csv")
+        res = run_cli(joinpath(dir, "curves.tsv"), "-m", "logistic", "-o", csv)
+        @test res.code == 0 && occursin("Model: LOGISTIC", res.out)
+        @test startswith.(readlines(csv)[2:3], ("A,Converged,", "B,No amplification (Noise),N/A")) == [true, true]
+        res = run_cli(joinpath(dir, "curves.tsv"), "-m", "logistic", "--fit-noise", "-o", csv)
+        @test !occursin("No amplification", read(csv, String))
     end
 end

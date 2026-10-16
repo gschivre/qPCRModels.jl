@@ -156,3 +156,33 @@ function isnoise(x; detection_threshold::Real = 5.0)
     expect = 2 * mad(diff(x)) * sqrt(log(length(x)))
     return obs ≤ (detection_threshold * expect)
 end
+
+# Iteratively reweighted least squares from β with weight function `wfun(u)` of the standardised residuals
+# u = r / (s √(1 - h)), where s is the MAD of the residuals and h the leverages.
+# Returns (β, w, converged), with w the final weights.
+function _irls(wfun, X, y, β, h; maxiter = 100, tol = 1e-8)
+    w = ones(length(y))
+    for _ in 1:maxiter
+        r = y - X * β
+        s = mad(r)
+        (s ≤ 10 * eps(maximum(abs, y))) && return (β, w, true) # more than half of the points fitted to rounding
+        @. w = wfun(r / (s * sqrt(max(1 - h, eps()))))
+        β_old = β
+        sw = sqrt.(w) # weighted least squares: minimise ∑ wᵢ rᵢ²
+        β = (sw .* X) \ (sw .* y)
+        (norm(β - β_old) < tol * (1 + norm(β))) && return (β, w, true)
+    end
+    return (β, w, false)
+end
+
+# Robust linear regression y ≈ Xβ with Tukey's bisquare weights.
+# Bisquare weights vanish for large residuals, so starting from least squares fails when outliers shift the fit
+# by more than a few robust scales (all points rejected): Huber iterations, which never reject a point, give the start.
+# Returns (β, w, converged), with w the final bisquare weights (0 for rejected points).
+function _bisquare_irls(X::AbstractMatrix, y::AbstractVector; c = 4.685, k = 1.345, kwargs...)
+    h = diag(X * ((X' * X) \ X')) # leverages
+    β, _, _ = _irls(u -> min(1.0, k / abs(u)), X, y, X \ y, h; kwargs...)
+    β, w, converged = _irls(u -> max(1 - (u / c)^2, 0.0)^2, X, y, β, h; kwargs...)
+    converged || @warn "Reached maximum number of iterations" func = "_bisquare_irls"
+    return (β, w, converged)
+end

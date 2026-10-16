@@ -16,6 +16,9 @@
   - `cycletreshold`, `hac`, `sdm`: Threshold, half-amplification cycle, and second-derivative maximum estimators.
   - `isnoise`: Noise and non-amplification detection heuristic based on Median Absolute Deviation.
   - `AICc`, `chisq`, `reducedchisq`, `get_x0`, `get_logx0`: Model quality criteria and initial concentration estimators.
+  - `get_stderrors`: Standard errors of the fitted parameters and of `ln(x₀)`.
+- **Absolute quantification**:
+  - `calibration`, `quantify`: Robust standard curve from wells of known quantity, and its use on new samples.
 - **Built-in Datasets**:
   - `qpcRDataset`, `load_qpcR_dataset`: Access to benchmark qPCR datasets (e.g. `batsch1`, `boggy`, `testdat`).
 """
@@ -32,6 +35,8 @@ include("utils.jl")
 include("models.jl")
 include("solver.jl")
 include("datasets.jl")
+include("calibration.jl")
+include("show.jl")
 
 # Export public interface
 export NonLinearLeastSquare, BirchModel, LogisticModel, RichardsModel, MAK2Model
@@ -41,7 +46,8 @@ export fit!, refit!, update_n!, hasamplification, hasconverged, isfitted
 export residualsJacobian, residuals!, residuals
 export chisq, reducedchisq, AICc
 export get_predicted, get_params, get_linearparams, get_linearparams!
-export get_x0, get_logx0, get_cy0
+export get_x0, get_logx0, get_cy0, get_stderrors
+export CalibrationCurve, calibration, quantify
 export qpcRDataset, load_qpcR_dataset, DatasetDetails
 
 end # module qPCRModels

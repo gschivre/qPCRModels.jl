@@ -149,6 +149,27 @@ For each cycle, the equation is solved for $\ln x$ with a safeguarded Newton sol
 * **Inflection point**: $x_i = 1/\left(1 + \sqrt{1 + b}\right)$. This is $1/2$ for the logistic case and lower for $b \gt 0$.
 * **Cy₀** (Guescini et al., *BMC Bioinformatics* 2008): the intersection of the tangent at the inflection point with the baseline (`get_cy0`).
 
+## Comparison on real data
+
+The figures below use the `dil4reps94` dataset: four 10-fold dilutions with 94 replicates each. They are made by `examples/figures.jl`.
+
+### Fit of one typical curve
+
+All four models fitted to the same curve. MAK2 is fitted only up to the second-derivative maximum (dotted line). The 4PL logistic curve is symmetric, so it cannot follow both the sharp take-off and the slow approach to the plateau; this gives the large wave in its residuals. The Birch model fits the whole curve as well as the 5PL Richards curve, with one non-linear parameter fewer.
+
+![Birch, Logistic, Richards and MAK2 fitted to one dil4reps94 curve, with residuals](docs/src/assets/fit_example.png)
+
+### Accuracy of the initial quantity
+
+If $x_0$ is estimated correctly, $\log_{10} x_0$ against $\log_{10}$ of the relative template amount is a straight line with slope 1. Each panel shows the robust standard curve fitted by `calibration`.
+
+![log10 x0 against dilution for the four models](docs/src/assets/x0_dil4reps94.png)
+
+* **Birch** gives the slope closest to 1 and the smallest spread between replicates.
+* **Logistic** gives a slope close to 1, but with a much larger spread, especially at the lowest template amount.
+* **MAK2** uses only the start of the curve, so its estimates are noisier and its slope is below 1.
+* **Richards** cannot be used to estimate $x_0$: the asymmetry parameter makes the extrapolation to cycle 0 unstable, so the values are meaningless.
+
 ## Installation
 
 ```julia
@@ -179,7 +200,36 @@ get_params(m)     # (b, tₘ)
 get_x0(m)         # initial quantity n₀/K
 get_cy0(m)        # Cy₀ cycle
 AICc(m)           # model selection criterion
+get_stderrors(m)  # standard errors of b, tₘ, F_bg, F_max and ln x₀
 ```
+
+A fitted model prints a summary in the REPL, with standard errors:
+
+```
+BirchModel · 45 cycles · converged
+  b          1.133 ± 0.061
+  tₘ         25.389 ± 0.046
+  F_bg       5477 ± 12
+  F_max      4946 ± 22
+  log₁₀ x₀  -7.302 ± 0.021
+  Cy₀        21.01
+  RSE = 51.34 · AICc = -206.2
+```
+
+`RSE` is the residual standard error, in fluorescence units.
+
+### Absolute quantification
+
+$x_0$ is a relative quantity ($n_0/K$). To get absolute quantities (e.g. copies), fit a standard curve $\log_{10} x_0 = \alpha + \beta \log_{10} q$ on wells of known quantity $q$, then apply it to new samples:
+
+```julia
+standards = [BirchModel(y) for y in standard_curves] # wells with 10⁵, 10⁴, 10³ and 10² copies
+foreach(fit!, standards)
+cal = calibration([1e5, 1e4, 1e3, 1e2], standards)
+quantify(cal, sample) # copies in a fitted sample well
+```
+
+The line is fitted robustly (Tukey bisquare weights), so outlier wells are down-weighted. Models that did not converge are left out. With a mechanistic model, $x_0$ is proportional to the template, so the slope should be close to 1. `fixed_slope = true` fixes it to 1 and fits only the intercept.
 
 ## Command-line interface
 
@@ -207,9 +257,12 @@ qPCRModels.jl/
 │   ├── qPCRModels.jl     # module entry point and exports
 │   ├── models.jl         # Birch, Logistic, Richards, MAK2 models
 │   ├── solver.jl         # Levenberg–Marquardt and safeguarded Newton root-finding
-│   ├── utils.jl          # Ct, HAC, SDM, noise detection
-│   └── datasets.jl       # built-in qpcR datasets
+│   ├── utils.jl          # Ct, HAC, SDM, noise detection, robust regression
+│   ├── datasets.jl       # built-in qpcR datasets
+│   ├── calibration.jl    # standard curves for absolute quantification
+│   └── show.jl           # REPL display of models and calibration curves
 ├── bin/qpcr_fit.jl       # CLI
+├── examples/figures.jl   # README figures (own Project.toml, needs CairoMakie)
 ├── qpcR_datasets/        # benchmark datasets from the R package qpcR (GPL ≥ 2)
 ├── test/                 # test suite (own Project.toml)
 ├── docs/                 # Documenter.jl documentation

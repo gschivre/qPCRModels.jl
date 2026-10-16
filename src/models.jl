@@ -5,7 +5,7 @@
 
 Abstract base type for all non-linear least squares qPCR amplification models in `qPCRModels`.
 
-Subtypes must implement parameter transformations (`get_params`), linear variable projection parameter computation (`get_linearparams!`), and residual/Jacobian calculations (`residualsJacobian!`).
+Subtypes must implement parameter transformations (`get_params`), linear variable projection parameter computation (`get_linearparams!`), and the curve with its sensitivities to the non-linear parameters (`_curve_jacobian!`, used by the generic `residualsJacobian!`).
 """
 abstract type NonLinearLeastSquare end
 
@@ -197,28 +197,7 @@ function _birch_curve!(nlm::BirchModel, J = nothing; RFtol = 10 * eps(), RFmaxit
     return true
 end
 
-# Compute residuals and Jacobian
-function residualsJacobian!(r, J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100)
-    if !_birch_curve!(nlm, J; RFtol = RFtol, RFmaxiter = RFmaxiter)
-        # trial step outside floating-point range: infinite χ² makes LevenbergMarquardt! reject it
-        fill!(r, Inf)
-        fill!(J, 0.0)
-        return nothing
-    end
-    copyto!(r, nlm.data)
-    F = svd(nlm.xmat)
-    Finv = _pinv(F)
-    nlm.linearparams .= Finv * nlm.data
-    mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = 0.0 # residuals coupling term
-    @views for j in 1:2
-        rc = dot(J[:, j], r)
-        J[:, j] .*= nlm.linearparams[2]
-        J[:, j] .-= F.U * (F.U' * J[:, j])
-        J[:, j] .+= Finv[2, :] * rc
-    end
-    return nothing
-end
+_curve_jacobian!(J, nlm::BirchModel; RFtol = 10 * eps(), RFmaxiter = 100) = _birch_curve!(nlm, J; RFtol = RFtol, RFmaxiter = RFmaxiter)
 
 ### 4-parameters logistic model
 
@@ -315,8 +294,7 @@ function get_cy0(nlm::LogisticModel)
     return tₘ - 2 / a
 end
 
-# Compute residuals and Jacobian
-function residualsJacobian!(r, J, nlm::LogisticModel)
+function _curve_jacobian!(J, nlm::LogisticModel)
     a, tₘ = get_params(nlm)
     for i in eachindex(nlm.data)
         x = logistic(a * (i - tₘ))
@@ -325,19 +303,7 @@ function residualsJacobian!(r, J, nlm::LogisticModel)
         J[i, 1] = (tₘ - i) * a * dFinv
         J[i, 2] = a * dFinv
     end
-    copyto!(r, nlm.data)
-    F = svd(nlm.xmat)
-    Finv = _pinv(F)
-    nlm.linearparams .= Finv * nlm.data
-    mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = 0.0 # residuals coupling term
-    @views for j in 1:2
-        rc = dot(J[:, j], r)
-        J[:, j] .*= nlm.linearparams[2]
-        J[:, j] .-= F.U * (F.U' * J[:, j])
-        J[:, j] .+= Finv[2, :] * rc
-    end
-    return nothing
+    return true
 end
 
 ### Richards's logistic model (5-parameters logistic)
@@ -457,8 +423,7 @@ function get_cy0(nlm::RichardsModel)
     return tₘ - (1 + ν + log(ν)) / a
 end
 
-# Compute residuals and Jacobian
-function residualsJacobian!(r, J, nlm::RichardsModel)
+function _curve_jacobian!(J, nlm::RichardsModel)
     a, tₘ, ν = get_params(nlm)
     for i in eachindex(nlm.data)
         logx = logRichardsLogistic(a * (i - tₘ), ν)
@@ -472,19 +437,7 @@ function residualsJacobian!(r, J, nlm::RichardsModel)
             J[i, 3] = 0.0
         end
     end
-    copyto!(r, nlm.data)
-    F = svd(nlm.xmat)
-    Finv = _pinv(F)
-    nlm.linearparams .= Finv * nlm.data
-    mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = 0.0 # residuals coupling term
-    @views for j in 1:3
-        rc = dot(J[:, j], r)
-        J[:, j] .*= nlm.linearparams[2]
-        J[:, j] .-= F.U * (F.U' * J[:, j])
-        J[:, j] .+= Finv[2, :] * rc
-    end
-    return nothing
+    return true
 end
 
 ### MAK2 model
@@ -592,28 +545,13 @@ function _mak2_curve!(nlm::MAK2Model, z₀; RFtol = 10 * eps(), RFmaxiter = 100)
     return true
 end
 
-# Compute residuals and Jacobian
-function residualsJacobian!(r, J, nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
+function _curve_jacobian!(J, nlm::MAK2Model; RFtol = 10 * eps(), RFmaxiter = 100)
     z₀ = get_params(nlm)
-    if !_mak2_curve!(nlm, z₀; RFtol = RFtol, RFmaxiter = RFmaxiter)
-        # trial step outside floating-point range: infinite χ² makes LevenbergMarquardt! reject it
-        fill!(r, Inf)
-        fill!(J, 0.0)
-        return nothing
-    end
+    _mak2_curve!(nlm, z₀; RFtol = RFtol, RFmaxiter = RFmaxiter) || return false
     for i in 1:nlm.n
-        J[i] = -expm1(z₀) * log1p(nlm.xmat[i, 2]) / z₀
+        J[i, 1] = -expm1(z₀) * log1p(nlm.xmat[i, 2]) / z₀
     end
-    copyto!(r, view(nlm.data, 1:nlm.n))
-    F = svd(nlm.xmat)
-    Finv = _pinv(F)
-    nlm.linearparams .= Finv * view(nlm.data, 1:nlm.n)
-    mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
-    rc = dot(J, r) # residuals coupling term
-    rmul!(J, nlm.linearparams[2])
-    J .-= F.U * (F.U' * J)
-    J .+= view(Finv, 2, :) * rc
-    return nothing
+    return true
 end
 
 """
@@ -652,6 +590,35 @@ function refit!(nlm::MAK2Model; kwargs...)
 end
 
 ### Generic evaluation functions
+
+# Data the model is fitted to (MAK2 only uses its window)
+_fitdata(nlm::NonLinearLeastSquare) = nlm.data
+_fitdata(nlm::MAK2Model) = view(nlm.data, 1:nlm.n)
+
+# Compute residuals and Jacobian by Variable Projection.
+# Each model's `_curve_jacobian!(J, nlm)` fills `nlm.xmat[:, 2]` with the curve x and `J` with -∂x/∂params,
+# and returns `false` when the curve is not representable in Float64.
+function residualsJacobian!(r, J, nlm::NonLinearLeastSquare; kwargs...)
+    if !_curve_jacobian!(J, nlm; kwargs...)
+        # trial step outside floating-point range: infinite χ² makes LevenbergMarquardt! reject it
+        fill!(r, Inf)
+        fill!(J, 0.0)
+        return nothing
+    end
+    y = _fitdata(nlm)
+    copyto!(r, y)
+    F = svd(nlm.xmat)
+    Finv = _pinv(F)
+    nlm.linearparams .= Finv * y
+    mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
+    @views for j in axes(J, 2)
+        rc = dot(J[:, j], r) # residuals coupling term
+        J[:, j] .*= nlm.linearparams[2]
+        J[:, j] .-= F.U * (F.U' * J[:, j])
+        J[:, j] .+= Finv[2, :] * rc
+    end
+    return nothing
+end
 
 """
     fit!(nlm::NonLinearLeastSquare; fit_noise::Bool = false, kwargs...)
@@ -804,4 +771,80 @@ function AICc(nlm::NonLinearLeastSquare; kwargs...)
     n = size(nlm.xmat, 1)
     k = length(nlm.params) + length(nlm.linearparams)
     return n * log(chi2 / n) + 2 * k + n * (1 + log(2π)) + 2 * (k ^ 2 + k) / (n - k - 1)
+end
+
+### Standard errors
+
+# Names of the physical non-linear parameters returned by `get_params` (MAK2 has none besides x₀)
+_param_names(::BirchModel) = (:b, :tₘ)
+_param_names(::LogisticModel) = (:a, :tₘ)
+_param_names(::RichardsModel) = (:a, :tₘ, :ν)
+_param_names(::MAK2Model) = ()
+
+# Derivative of each physical parameter with respect to its internal parameter `nlm.params[k]`
+function _dphysical(nlm::BirchModel)
+    b, _ = get_params(nlm)
+    return (1 + b, 1.0) # b = expm1(params[1])
+end
+_dphysical(nlm::LogisticModel) = (get_params(nlm)[1], 1.0) # a = exp(params[1])
+function _dphysical(nlm::RichardsModel)
+    a, _, ν = get_params(nlm)
+    return (a, 1.0, ν) # a = exp(params[1]), ν = exp(params[3])
+end
+_dphysical(::MAK2Model) = ()
+
+# Gradient of ln(x₀) with respect to `nlm.params`
+function _logx0_gradient(nlm::BirchModel; kwargs...)
+    b, _ = get_params(nlm)
+    z₀ = get_logx0(nlm; kwargs...)
+    dg = 1 + (1 + b) / expm1(-z₀) # implicit differentiation of z - (1 + b) ln(1 - eᶻ) = ln(2) (b - tₘ)
+    return [(1 + b) * (log(2) + log1mexp(z₀)) / dg, -log(2) / dg]
+end
+function _logx0_gradient(nlm::LogisticModel)
+    a, tₘ = get_params(nlm)
+    d = logistic(a * tₘ) # d/du loglogistic(u) at u = -a tₘ
+    return [-a * tₘ * d, -a * d]
+end
+function _logx0_gradient(nlm::RichardsModel)
+    a, tₘ, ν = get_params(nlm)
+    d = logistic(a * tₘ) / ν # ln x₀ = loglogistic(-a tₘ) / ν
+    return [-a * tₘ * d, -a * d, -get_logx0(nlm)]
+end
+_logx0_gradient(::MAK2Model; kwargs...) = [1.0] # params[1] = ln(x₀)
+
+# Gauss–Newton covariance s² (JᵀJ)⁻¹ of (params..., linearparams...) on the scaled data, where J is the Jacobian
+# of the model c₁ + c₂ x in all parameters. `NaN` when JᵀJ is singular or the curve cannot be computed.
+function _covariance(nlm::NonLinearLeastSquare; kwargs...)
+    n, m = size(nlm.xmat, 1), length(nlm.params)
+    J = zeros(n, m + 2)
+    @views if _curve_jacobian!(J[:, 1:m], nlm; kwargs...)
+        J[:, 1:m] .*= -nlm.linearparams[2] # _curve_jacobian! gives -∂x/∂params
+        J[:, m + 1] .= 1.0
+        J[:, m + 2] .= nlm.xmat[:, 2]
+        H = cholesky!(Symmetric(J' * J); check = false)
+        issuccess(H) && return reducedchisq(nlm; kwargs...) .* inv(H)
+    end
+    return fill(NaN, m + 2, m + 2)
+end
+
+"""
+    get_stderrors(nlm::NonLinearLeastSquare; kwargs...)
+
+Standard errors of a fitted model, as a `NamedTuple`: the non-linear parameters returned by `get_params`
+(none for `MAK2Model`), the baseline `F_bg` and scale `F_max` (raw fluorescence units) and `logx0` (of `get_logx0`).
+
+They come from the Gauss–Newton covariance `s² (JᵀJ)⁻¹` at the optimum, where `J` is the Jacobian of the model
+in all its parameters and `s² = χ²/(n - k)`, and are propagated to the reported quantities by the delta method.
+All values are `NaN` when the model is not fitted.
+"""
+function get_stderrors(nlm::NonLinearLeastSquare; kwargs...)
+    names = (_param_names(nlm)..., :F_bg, :F_max, :logx0)
+    isfitted(nlm) || return NamedTuple{names}(ntuple(_ -> NaN, length(names)))
+    m = length(nlm.params)
+    C = _covariance(nlm; kwargs...)
+    se = sqrt.(max.(diag(C), 0.0))
+    g = _logx0_gradient(nlm; kwargs...)
+    se_logx0 = sqrt(max(dot(g, view(C, 1:m, 1:m), g), 0.0))
+    se_nonlinear = _dphysical(nlm) .* Tuple(se[1:length(_param_names(nlm))])
+    return NamedTuple{names}((se_nonlinear..., nlm.σ * se[m + 1], nlm.σ * se[m + 2], se_logx0))
 end

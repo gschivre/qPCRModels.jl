@@ -11,3 +11,4 @@ deps/deps.jl
 .DS_Store
 /docs/src/index.md
 /docs/src/birch.md
+/examples/Manifest*.toml

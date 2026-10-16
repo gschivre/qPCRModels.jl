@@ -87,7 +87,7 @@ Solves `f(x) + offset = 0` within bracket `[a, b]`. Automatically reverts to bis
 
 # Keyword Arguments
 - `x₀::Real`: Initial starting guess (defaults to interval midpoint `(a + b)/2`).
-- `RFtol::Real`: Desired absolute tolerance on root position.
+- `RFtol::Real`: Desired tolerance on root position (absolute for `|x| ≤ 1`, relative for `|x| > 1`); the search always stops once a step is within one ulp of `x`.
 - `RFmaxiter::Int`: Maximum allowed iterations (default: `100`).
 - `offset::Real`: Target offset value (default: `0.0`).
 
@@ -114,7 +114,9 @@ function newtsafe_rootfinding(f, df, a, b; x₀ = (a + b) / 2, RFtol = 10 * eps(
         dx_old = dx
         dx = (reject_newton ? (0.5 * (xₕ - xₗ)) : (fx / dfx))
         x = ifelse(reject_newton, (xₗ + dx), (x - dx))
-        (abs(dx) < RFtol) && return (x, true)
+        # relative for |x| > 1: an absolute RFtol below eps(x) could never be met (e.g. MAK2 trial steps with z ≈ 40);
+        # a step within one ulp is always final, so RFtol = 0 means "to machine precision"
+        (abs(dx) < RFtol * max(1.0, abs(x)) || abs(dx) ≤ eps(x)) && return (x, true)
         fx = f(x) + offset
         dfx = df(x)
         # update brackets

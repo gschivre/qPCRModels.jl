@@ -12,6 +12,7 @@ end
 function to_documenter(md)
     md = replace(md, r"^([ \t]*)\$\$\n(.*?)\n[ \t]*\$\$"ms => s"\1```math\n\2\n\1```")
     md = replace(md, r"\$(.+?)\$" => s"``\1``")
+    md = replace(md, "](docs/src/assets/" => "](assets/") # generated pages live in docs/src
     return replace(md, "](#discrete-cycles-vs-continuous-time)" => "](@ref \"Discrete cycles vs continuous time\")")
 end
 
