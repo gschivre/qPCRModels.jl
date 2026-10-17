@@ -295,11 +295,17 @@ qPCRModels.jl/
 
 The source code is released under the [MIT license](LICENSE). The benchmark datasets in `qpcR_datasets/` come from the R package [qpcR](https://cran.r-project.org/package=qpcR) and are distributed under its license, GPL (≥ 2); see [`qpcR_datasets/README.md`](qpcR_datasets/README.md) for their sources and citations.
 
-## Running the tests
+## Acknowledgements
 
-```julia
-using Pkg; Pkg.test("qPCRModels")
-```
+Part of this package was developed with the help of Claude, an AI coding agent made by Anthropic, used through Claude Code. Working with the author, Claude helped to:
+
+* restructure the code as a standard Julia package, with CI, documentation and a command-line interface;
+* fix the time scale of the MAK2 model and make the Birch and Richards fits robust on drifting curves;
+* write the test suite and fix the bugs it found;
+* add standard errors, calibration curves for absolute quantification and the REPL display of fitted models;
+* write and check much of this README, including the written presentation of the Birch model derivation and the analysis of why the Richards model fails to estimate $x_0$.
+
+The original package and its models were written by the author. The derivation of the Birch model from the PCR reaction scheme (the competition between primer annealing and template re-annealing, which gives $b = k_2/k_1 - 1$) is the author's original contribution; Claude only helped to write it up. The commits made with Claude carry a `Co-Authored-By: Claude` line in the git history.
 
 ## References
 
