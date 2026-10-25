@@ -1,22 +1,23 @@
 #!/usr/bin/env julia
 # bin/qpcr_fit.jl - CLI tool for qPCR model fitting.
+#
+# The script is also the entry point of the standalone executable built by juliac/build.jl,
+# so it must stay trimmable: every value has a concrete type, output goes through Core.stdout
+# and Core.stderr, and caught exceptions are never printed as such.
 
 using Printf
 using qPCRModels
 
 # Constants
-const VALID_MODELS = Dict(
-    "birch" => BirchModel,
-    "logistic" => LogisticModel,
-    "richards" => RichardsModel,
-    "mak2" => MAK2Model
-)
+const MODEL_NAMES = ("birch", "logistic", "richards", "mak2")
+const LINE = "========================================================================================"
+const DASHES = "----------------------------------------------------------------------------------------"
 
-function print_help()
-    println("""
+const HELP = """
 qPCR Model Fitting CLI Tool
 ===========================
 Usage:
+  qpcr_fit <dataset_or_filepath> [options]                         (standalone executable)
   julia --project=. bin/qpcr_fit.jl <dataset_or_filepath> [options]
 
 Arguments:
@@ -30,245 +31,203 @@ Options:
   -h, --help              Show this help message and exit
 
 Examples:
-  julia --project=. bin/qpcr_fit.jl batsch1
-  julia --project=. bin/qpcr_fit.jl qpcR_datasets/boggy.txt --model mak2 -o boggy_results.csv
-""")
+  qpcr_fit batsch1
+  qpcr_fit qpcR_datasets/boggy.txt --model mak2 -o boggy_results.csv
+"""
+
+struct Options
+    input::String # empty if not given
+    model::String
+    output::String # empty if not given
+    fit_noise::Bool
+    help::Bool
 end
 
-function parse_args(args)
-    options = Dict{Symbol, Any}(
-        :input => nothing,
-        :model => "birch",
-        :output => nothing,
-        :fit_noise => false,
-        :help => false
-    )
-    
+struct CurveResult
+    curve::String
+    status::String
+    x0::Float64 # NaN unless the fit converged
+    log_x0::Float64
+    aicc::Float64
+    red_chisq::Float64
+end
+
+# Bad arguments or data. Its message is a `String`: the `AbstractString` message of
+# `ErrorException` or `ArgumentError` cannot be printed in a trimmed executable.
+struct CLIError <: Exception
+    msg::String
+end
+
+out(s::String) = (print(Core.stdout, s); nothing)
+err(s::String) = (print(Core.stderr, s); nothing)
+
+# Message of a caught exception; anything else than bad input or a failed file operation is a bug and is rethrown
+errmsg(e) = e isa CLIError ? e.msg : e isa SystemError ? e.prefix : rethrow()
+
+function parse_args(args::Vector{String})
+    input, model, output, fit_noise, help = "", "birch", "", false, false
     i = 1
     while i <= length(args)
         arg = args[i]
         if arg == "-h" || arg == "--help"
-            options[:help] = true
+            help = true
         elseif arg == "-m" || arg == "--model"
-            if i + 1 <= length(args)
-                options[:model] = lowercase(args[i+1])
-                i += 1
-            else
-                error("Missing value for option --model")
-            end
+            i + 1 <= length(args) || throw(CLIError("Missing value for option --model"))
+            model = lowercase(args[i+1])
+            i += 1
         elseif arg == "-o" || arg == "--output"
-            if i + 1 <= length(args)
-                options[:output] = args[i+1]
-                i += 1
-            else
-                error("Missing value for option --output")
-            end
+            i + 1 <= length(args) || throw(CLIError("Missing value for option --output"))
+            output = args[i+1]
+            i += 1
         elseif arg == "--fit-noise"
-            options[:fit_noise] = true
+            fit_noise = true
         elseif startswith(arg, "-")
-            error("Unknown option: $arg")
+            throw(CLIError("Unknown option: " * arg))
         else
-            if isnothing(options[:input])
-                options[:input] = arg
-            else
-                error("Multiple input arguments specified")
-            end
+            isempty(input) || throw(CLIError("Multiple input arguments specified"))
+            input = arg
         end
         i += 1
     end
-    return options
+    return Options(input, model, output, fit_noise, help)
 end
 
-function load_custom_file(filepath)
-    if !isfile(filepath)
-        error("File not found: $filepath")
-    end
-    
-    lines = filter(!isempty, strip.(readlines(filepath)))
-    if isempty(lines)
-        error("File is empty: $filepath")
-    end
-    
+function load_custom_file(filepath::String)
+    isfile(filepath) || throw(CLIError("File not found: " * abspath(filepath)))
+
+    lines = filter(!isempty, strip.(split(read(filepath, String), '\n')))
+    isempty(lines) && throw(CLIError("File is empty: " * filepath))
+
     first_line = lines[1]
     delim = ','
     if occursin('\t', first_line)
         delim = '\t'
     elseif occursin(';', first_line)
         delim = ';'
-    elseif occursin(' ', first_line) && !occursin(',', first_line) && !occursin('\t', first_line)
+    elseif occursin(' ', first_line) && !occursin(',', first_line)
         delim = ' '
     end
-    
-    header = split(first_line, delim; keepempty = false)
-    colnames = String.(strip.(header))
-    
-    num_rows = length(lines) - 1
-    num_cols = length(colnames)
-    data = zeros(Float64, num_rows, num_cols)
-    
-    for (i, line) in enumerate(lines[2:end])
-        tokens = split(line, delim; keepempty = false)
-        if length(tokens) < num_cols
-            error("Row $(i+1) has fewer columns than the header ($(length(tokens)) vs $num_cols)")
+
+    colnames = String[String(strip(h)) for h in split(first_line, delim; keepempty = false)]
+    data = zeros(Float64, length(lines) - 1, length(colnames))
+    for i in 2:length(lines)
+        tokens = split(lines[i], delim; keepempty = false)
+        if length(tokens) < length(colnames)
+            throw(CLIError("Row " * string(i) * " has fewer columns than the header (" * string(length(tokens)) * " vs " * string(length(colnames)) * ")"))
         end
-        for j in 1:num_cols
-            data[i, j] = parse(Float64, tokens[j])
+        for j in eachindex(colnames)
+            v = tryparse(Float64, tokens[j])
+            isnothing(v) && throw(CLIError("Row " * string(i) * ", column " * string(j) * ": '" * String(tokens[j]) * "' is not a number"))
+            data[i-1, j] = v
         end
     end
-    
+
     return colnames, data
 end
 
-function main()
-    options = try
-        parse_args(ARGS)
-    catch e
-        println(stderr, "Error: ", e.msg)
-        println(stderr)
-        print_help()
-        exit(1)
+function fit_curve(m::NonLinearLeastSquare, name::String, fit_noise::Bool)
+    fit!(m; fit_noise = fit_noise)
+    if isfitted(m)
+        hasconverged(m) || return CurveResult(name, "Failed to converge", NaN, NaN, NaN, NaN)
+        return CurveResult(name, "Converged", get_x0(m), get_logx0(m), AICc(m), reducedchisq(m))
     end
-    
-    if options[:help] || isnothing(options[:input])
-        print_help()
-        exit(0)
-    end
-    
-    input = options[:input]
-    model_name = options[:model]
-    output_path = options[:output]
-    fit_noise = options[:fit_noise]
-    
-    if !(model_name in keys(VALID_MODELS))
-        println(stderr, "Error: Invalid model '$model_name'. Allowed: ", join(keys(VALID_MODELS), ", "))
-        exit(1)
-    end
-    
-    model_type = VALID_MODELS[model_name]
-    
-    colnames = String[]
-    data = Matrix{Float64}(undef, 0, 0)
-    dataset_details = ""
-    
-    if input in keys(DatasetDetails)
-        try
-            ds = qpcRDataset(input)
-            colnames = ds.colnames
-            data = ds.data
-            setup = ds.details.Setup
-            details = ds.details.Details
-            dataset_details = "Built-in Dataset: $input\nSetup: $setup\nDetails: $details\n"
-        catch e
-            println(stderr, "Error loading built-in dataset: ", e)
-            exit(1)
-        end
-    else
-        try
-            colnames, data = load_custom_file(input)
-        catch e
-            println(stderr, "Error loading custom file '$input': ", e)
-            exit(1)
-        end
-    end
-    
-    num_rows, num_cols = size(data)
-    if num_cols < 1
-        println(stderr, "Error: No columns found in data.")
-        exit(1)
-    end
-    
-    start_col = 2
-    if num_cols == 1
-        start_col = 1
-        curves = ["Curve1"]
-    else
-        curves = colnames[start_col:end]
-    end
-    
-    println("="^88)
-    if !isempty(dataset_details)
-        print(dataset_details)
-    else
-        println("Input File: $input")
-    end
-    println("Model: ", uppercase(model_name))
-    println("Cycles detected: $num_rows")
-    println("Curves to fit: ", length(curves))
-    println("="^88)
-    
-    @printf("%-18s %-25s %-12s %-10s %-10s %-12s\n", "Curve", "Status", "x0", "log(x0)", "AICc", "Red.Chisq")
-    println("-"^88)
-    
-    results = []
-    
-    for (i, curve_name) in enumerate(curves)
-        col_idx = start_col - 1 + i
-        y = data[:, col_idx]
-        
-        m = model_type(y)
-        fit!(m; fit_noise = fit_noise)
-        
-        status = "Failed"
-        x0_val = "N/A"
-        log_x0_val = "N/A"
-        aicc_val = "N/A"
-        red_chisq_val = "N/A"
-        
-        if isfitted(m)
-            if hasconverged(m)
-                status = "Converged"
-                x0_val = get_x0(m)
-                log_x0_val = get_logx0(m)
-                aicc_val = AICc(m)
-                red_chisq_val = reducedchisq(m)
-            else
-                status = "Failed to converge"
-            end
-        else
-            if !hasamplification(m)
-                status = "No amplification (Noise)"
-            else
-                status = "Not fitted"
-            end
-        end
-        
-        push!(results, (
-            curve = curve_name,
-            status = status,
-            x0 = x0_val,
-            log_x0 = log_x0_val,
-            aicc = aicc_val,
-            red_chisq = red_chisq_val
-        ))
-        
-        if status == "Converged"
-            @printf("%-18s %-25s %-12.4e %-10.2f %-10.2f %-12.4e\n", curve_name, status, x0_val, log_x0_val, aicc_val, red_chisq_val)
-        else
-            @printf("%-18s %-25s %-12s %-10s %-10s %-12s\n", curve_name, status, "N/A", "N/A", "N/A", "N/A")
-        end
-    end
-    println("-"^88)
-    
-    if !isnothing(output_path)
-        try
-            open(output_path, "w") do f
-                write(f, "Curve,Status,x0,log_x0,AICc,Reduced_Chisq\n")
-                for r in results
-                    x0_str = r.x0 isa Number ? @sprintf("%.8e", r.x0) : "N/A"
-                    log_x0_str = r.log_x0 isa Number ? @sprintf("%.6f", r.log_x0) : "N/A"
-                    aicc_str = r.aicc isa Number ? @sprintf("%.6f", r.aicc) : "N/A"
-                    red_chisq_str = r.red_chisq isa Number ? @sprintf("%.8e", r.red_chisq) : "N/A"
-                    
-                    write(f, "$(r.curve),$(r.status),$(x0_str),$(log_x0_str),$(aicc_str),$(red_chisq_str)\n")
-                end
-            end
-            println("Results successfully saved to: $output_path")
-        catch e
-            println(stderr, "Error saving results to '$output_path': ", e)
-        end
-    end
+    status = hasamplification(m) ? "Not fitted" : "No amplification (Noise)"
+    return CurveResult(name, status, NaN, NaN, NaN, NaN)
 end
 
-if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+# A branch rather than a Dict of model types, so that each call has a concrete type
+function fit_curve(model::String, y::Vector{Float64}, name::String, fit_noise::Bool)
+    model == "birch" && return fit_curve(BirchModel(y), name, fit_noise)
+    model == "logistic" && return fit_curve(LogisticModel(y), name, fit_noise)
+    model == "richards" && return fit_curve(RichardsModel(y), name, fit_noise)
+    return fit_curve(MAK2Model(y), name, fit_noise)
+end
+
+_csv(x::Float64, fmt::Symbol) = isnan(x) ? "N/A" : fmt === :e ? @sprintf("%.8e", x) : @sprintf("%.6f", x)
+
+function main(args::Vector{String})
+    opts = try
+        parse_args(args)
+    catch e
+        err("Error: " * errmsg(e) * "\n\n" * HELP)
+        return 1
+    end
+
+    if opts.help || isempty(opts.input)
+        out(HELP)
+        return 0
+    end
+
+    if !(opts.model in MODEL_NAMES)
+        err("Error: Invalid model '" * opts.model * "'. Allowed: " * join(MODEL_NAMES, ", ") * "\n")
+        return 1
+    end
+
+    if haskey(DatasetDetails, opts.input)
+        ds = try
+            qpcRDataset(opts.input)
+        catch e
+            err("Error loading built-in dataset '" * opts.input * "': " * errmsg(e) * "\n")
+            return 1
+        end
+        colnames, data = ds.colnames, ds.data
+        header = "Built-in Dataset: " * opts.input * "\nSetup: " * ds.details.Setup * "\nDetails: " * ds.details.Details * "\n"
+    else
+        colnames, data = try
+            load_custom_file(opts.input)
+        catch e
+            err("Error loading custom file '" * opts.input * "': " * errmsg(e) * "\n")
+            return 1
+        end
+        header = "Input File: " * opts.input * "\n"
+    end
+
+    num_rows, num_cols = size(data)
+    if num_cols < 1
+        err("Error: No columns found in data.\n")
+        return 1
+    end
+    start_col = num_cols == 1 ? 1 : 2
+    curves = num_cols == 1 ? ["Curve1"] : colnames[2:end]
+
+    out(LINE * "\n" * header)
+    out("Model: " * uppercase(opts.model) * "\nCycles detected: " * string(num_rows) * "\nCurves to fit: " * string(length(curves)) * "\n")
+    out(LINE * "\n")
+    out(@sprintf("%-18s %-25s %-12s %-10s %-10s %-12s\n", "Curve", "Status", "x0", "log(x0)", "AICc", "Red.Chisq"))
+    out(DASHES * "\n")
+
+    results = CurveResult[]
+    for (i, curve_name) in enumerate(curves)
+        r = fit_curve(opts.model, data[:, start_col-1+i], curve_name, opts.fit_noise)
+        push!(results, r)
+        if r.status == "Converged"
+            out(@sprintf("%-18s %-25s %-12.4e %-10.2f %-10.2f %-12.4e\n", r.curve, r.status, r.x0, r.log_x0, r.aicc, r.red_chisq))
+        else
+            out(@sprintf("%-18s %-25s %-12s %-10s %-10s %-12s\n", r.curve, r.status, "N/A", "N/A", "N/A", "N/A"))
+        end
+    end
+    out(DASHES * "\n")
+
+    if !isempty(opts.output)
+        csv = IOBuffer()
+        print(csv, "Curve,Status,x0,log_x0,AICc,Reduced_Chisq\n")
+        for r in results
+            print(csv, r.curve, ",", r.status, ",", _csv(r.x0, :e), ",", _csv(r.log_x0, :f), ",", _csv(r.aicc, :f), ",", _csv(r.red_chisq, :e), "\n")
+        end
+        try
+            write(opts.output, take!(csv))
+        catch e
+            err("Error saving results to '" * opts.output * "': " * errmsg(e) * "\n")
+            return 1
+        end
+        out("Results successfully saved to: " * opts.output * "\n")
+    end
+    return 0
+end
+
+# Entry point: `@main` (Julia ≥ 1.11, needed by juliac); on older versions, run when the script is the program
+@static if isdefined(Base, Symbol("@main"))
+    @main
+else
+    abspath(PROGRAM_FILE) == (@__FILE__) && exit(main(ARGS))
 end

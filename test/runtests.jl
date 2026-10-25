@@ -66,6 +66,12 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test sdm(logistic.(0.5 .* ((1:45) .- 22.0))) == 19 # whole cycle without interpolation
 
         @test mad([1.0, 2.0, 3.0, 4.0, 100.0]) ≈ 1.4826022185056018 # robust to the outlier
+        @test mad([1, 2, 3, 4, 100]) ≈ 1.4826022185056018 # integer input
+        for n in (1, 2, 7, 10) # the trimmable median matches Statistics.median
+            v = randn(MersenneTwister(n), n)
+            @test qPCRModels._median!(copy(v)) == median(v)
+        end
+        @test isnan(qPCRModels._median!([1.0, NaN, 3.0]))
 
         flat = 1.0 .+ 0.01 .* sin.(7.3 .* (1:40)) # deterministic baseline wobble
         @test isnoise(flat)
@@ -399,15 +405,15 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
     @testset "Command-line interface" begin
         script = joinpath(pkgdir(qPCRModels), "bin", "qpcr_fit.jl")
         cli = Module(:CLI)
-        Base.include(cli, script) # main() only runs when the script is the program
-        @test cli.parse_args(["boggy"])[:input] == "boggy"
+        Base.include(cli, script) # main only runs when the script is the program (and its module is Main)
+        @test cli.parse_args(["boggy"]).input == "boggy"
         opts = cli.parse_args(["data.csv", "-m", "MAK2", "--output", "out.csv", "--fit-noise"])
-        @test opts[:model] == "mak2" && opts[:output] == "out.csv" && opts[:fit_noise]
-        @test cli.parse_args(["-h"])[:help]
-        @test_throws ErrorException cli.parse_args(["a", "b"])
-        @test_throws ErrorException cli.parse_args(["a", "--bogus"])
-        @test_throws ErrorException cli.parse_args(["a", "-m"])
-        @test_throws ErrorException cli.parse_args(["a", "-o"])
+        @test opts.model == "mak2" && opts.output == "out.csv" && opts.fit_noise
+        @test cli.parse_args(["-h"]).help
+        @test_throws cli.CLIError cli.parse_args(["a", "b"])
+        @test_throws cli.CLIError cli.parse_args(["a", "--bogus"])
+        @test_throws cli.CLIError cli.parse_args(["a", "-m"])
+        @test_throws cli.CLIError cli.parse_args(["a", "-o"])
 
         dir = mktempdir()
         amp = 1.0 .+ 10.0 .* logistic.(0.6 .* ((1:40) .- 22.0)) .+ 0.01 .* sin.(3.1 .* (1:40))
@@ -421,11 +427,14 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         end
         short = joinpath(dir, "short.csv")
         write(short, "Cycle,A\n1,2.0\n2\n")
-        @test_throws ErrorException cli.load_custom_file(short)
-        @test_throws ErrorException cli.load_custom_file(joinpath(dir, "missing.csv"))
+        @test_throws cli.CLIError cli.load_custom_file(short)
+        text = joinpath(dir, "text.csv")
+        write(text, "Cycle,A\n1,2.0\n2,abc\n")
+        @test_throws cli.CLIError("Row 3, column 2: 'abc' is not a number") cli.load_custom_file(text)
+        @test_throws cli.CLIError cli.load_custom_file(joinpath(dir, "missing.csv"))
         empty = joinpath(dir, "empty.csv")
         write(empty, "\n")
-        @test_throws ErrorException cli.load_custom_file(empty)
+        @test_throws cli.CLIError cli.load_custom_file(empty)
 
         # end-to-end runs in a separate process, with the test environment
         function run_cli(args...)
