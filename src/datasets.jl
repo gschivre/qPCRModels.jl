@@ -4,14 +4,14 @@
     get_dataset_folder()
 
 Return absolute filepath to the built-in `qpcR_datasets/` directory associated with `qPCRModels`.
+In a standalone executable built with juliac, the package directory is the one used at build time,
+so the copy in the bundle (`share/qpcR_datasets/`, next to `bin/`) is used instead.
 """
 function get_dataset_folder()
     pkg_path = pkgdir(@__MODULE__)
-    if !isnothing(pkg_path)
-        return joinpath(pkg_path, "qpcR_datasets")
-    else
-        return "qpcR_datasets"
-    end
+    folder = isnothing(pkg_path) ? "qpcR_datasets" : joinpath(pkg_path, "qpcR_datasets")
+    bundled = normpath(joinpath(Sys.BINDIR, "..", "share", "qpcR_datasets"))
+    return !isdir(folder) && isdir(bundled) ? bundled : folder
 end
 
 """
@@ -157,7 +157,7 @@ struct qpcRDataset{T<:AbstractFloat} <: AbstractMatrix{T}
 
     function qpcRDataset(::T, name::String) where {T<:AbstractFloat}
         filepath = joinpath(get_dataset_folder(), name * ".txt")
-        txt = readlines(filepath)
+        txt = split(read(filepath, String), "\n"; keepempty=false) # readlines(filepath) cannot be trimmed by juliac
         colnames = String.(split(txt[1], "\t"; keepempty=false))
         data = zeros(T, length(txt) - 1, length(colnames))
         for (i, lᵢ) in Iterators.enumerate(Iterators.drop(txt, 1))

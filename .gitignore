@@ -9,6 +9,6 @@ deps/build.log
 deps/deps.jl
 *.csv
 .DS_Store
-/docs/src/index.md
-/docs/src/birch.md
 /examples/Manifest*.toml
+/juliac/Manifest*.toml
+/juliac/qpcr_fit/

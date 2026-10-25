@@ -1,0 +1,65 @@
+name: Binary
+# Builds the standalone qpcr_fit executable with juliac/build.jl. On main and pull requests this checks
+# that bin/qpcr_fit.jl stays trimmable; on a version tag the archive is attached to the GitHub release.
+on:
+  push:
+    branches:
+      - main
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+jobs:
+  build:
+    name: qpcr_fit - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      actions: write # julia-actions/cache
+      contents: write # upload to the release
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1' # juliac needs Julia ≥ 1.12
+      - uses: julia-actions/cache@v3
+      - name: Build
+        run: |
+          julia --project=juliac -e 'using Pkg; Pkg.instantiate()'
+          julia --project=juliac juliac/build.jl
+      - name: Smoke test
+        run: |
+          juliac/qpcr_fit/bin/qpcr_fit --help
+          juliac/qpcr_fit/bin/qpcr_fit boggy -o boggy.csv
+          grep -q "F1.1,Converged" boggy.csv
+      - name: Archive
+        id: archive
+        shell: bash
+        run: |
+          name="qpcr_fit-${GITHUB_REF_NAME//\//-}-$(echo "${RUNNER_OS}-${RUNNER_ARCH}" | tr '[:upper:]' '[:lower:]')"
+          mv juliac/qpcr_fit "$name"
+          tar czf "$name.tar.gz" "$name"
+          echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.file }}
+          path: ${{ steps.archive.outputs.file }}
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # TagBot pushes the tag first and creates the release afterwards: wait for it (up to 30 min)
+          for i in $(seq 60); do
+            gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$GITHUB_REF_NAME" "${{ steps.archive.outputs.file }}" --clobber

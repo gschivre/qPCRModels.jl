@@ -1,4 +1,4 @@
-# Generate the README / documentation figures in docs/src/assets/.
+# Generate the documentation figures in docs/src/assets/.
 # Usage (from the repository root):
 #   julia --project=examples -e 'using Pkg; Pkg.instantiate()'
 #   julia --project=examples examples/figures.jl

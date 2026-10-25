@@ -104,7 +104,8 @@ function _count_svdvals(S, atol::Real, rtol::Real)
 end
 function _pinv(F::SVD{T}; atol::Real = 0, rtol::Real = (eps(real(float(oneunit(T))))*min(size(F)...)) * iszero(atol)) where {T}
     k = _count_svdvals(F.S, atol, rtol)
-    return @views F.Vt[k:-1:1, :]' * Diagonal(inv.(F.S[k:-1:1])) * F.U[:,k:-1:1]'
+    # copies, not views: the product of reversed views falls back to a generic matmul that juliac cannot trim
+    return F.V[:, k:-1:1] * Diagonal(inv.(F.S[k:-1:1])) * F.U[:, k:-1:1]'
 end
 
 # Drop trailing missing cycles (non-finite values), e.g. from runs stopped early.
@@ -128,9 +129,19 @@ Compute the Median Absolute Deviation (MAD) scaled by ~`1.4826` for normal consi
 - Scaled median absolute deviation.
 """
 function mad(x)
-    m = median(x)
-    xc = abs.(x .- m)
-    return median!(xc) * 1.4826022185056018
+    m = _median!(vec(float.(x)))
+    xc = vec(abs.(x .- m))
+    return _median!(xc) * 1.4826022185056018
+end
+
+# Same result as `Statistics.median!`, whose error message uses `repr`, which juliac cannot trim
+function _median!(v::AbstractVector{<:AbstractFloat})
+    isempty(v) && throw(ArgumentError("median of an empty array is undefined"))
+    any(isnan, v) && return eltype(v)(NaN)
+    h = length(v) ÷ 2
+    isodd(length(v)) && return partialsort!(v, h + 1)
+    s = partialsort!(v, h:h+1)
+    return (s[1] + s[2]) / 2
 end
 
 """
