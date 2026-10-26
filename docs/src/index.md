@@ -122,8 +122,8 @@ With `--standards`, the tool fits the standard curve on these wells (as [`calibr
 A compiled version of the command-line tool runs without Julia. Download the archive for your system (Linux x64 or macOS ARM) from the [Releases page](https://github.com/gschivre/qPCRModels.jl/releases), extract it, and run `bin/qpcr_fit`:
 
 ```bash
-tar xzf qpcr_fit-v0.1.0-linux-x64.tar.gz
-cd qpcr_fit-v0.1.0-linux-x64
+tar xzf qpcr_fit-v0.2.0-linux-x64.tar.gz
+cd qpcr_fit-v0.2.0-linux-x64
 bin/qpcr_fit batsch1
 bin/qpcr_fit path/to/data.csv --model mak2 -o results.csv
 ```
