@@ -4,7 +4,7 @@
 filter_kwargs(kwargs, allowed) = (; (k => v for (k, v) in kwargs if k in allowed)...)
 
 """
-    cycletreshold(x::AbstractVector, val::Real; linear_interp::Bool = false)
+    cyclethreshold(x::AbstractVector, val::Real; linear_interp::Bool = false)
 
 Estimate the fractional cycle number at which fluorescence signal `x` reaches target threshold `val`.
 
@@ -16,9 +16,9 @@ Estimate the fractional cycle number at which fluorescence signal `x` reaches ta
 # Returns
 - Fractional cycle number (`Float64`), or `NaN` if `val` is never reached.
 """
-function cycletreshold(x::AbstractVector, val::Real; linear_interp::Bool = false)
+function cyclethreshold(x::AbstractVector, val::Real; linear_interp::Bool = false)
     (maximum(x) < val) && return NaN
-    ct = findfirst(x .≥ val)
+    ct = findfirst(≥(val), x)
     if linear_interp && (ct > 1)
         δ = (val - x[ct]) / (x[ct] - x[ct - 1])
     else
@@ -34,7 +34,7 @@ Compute the Half Amplification Cycle (HAC), defined as the fractional cycle wher
 
 # Arguments
 - `x::AbstractVector`: Vector of fluorescence readings per cycle.
-- `kwargs...`: Additional options passed to `cycletreshold` (e.g. `linear_interp = true`).
+- `kwargs...`: Additional options passed to `cyclethreshold` (e.g. `linear_interp = true`).
 
 # Returns
 - Fractional cycle number corresponding to 50% max fluorescence.
@@ -43,7 +43,7 @@ function hac(x::AbstractVector; kwargs...)
     xmin = minimum(x)
     xmax = maximum(x)
     h = xmin + 0.5 * (xmax - xmin)
-    return cycletreshold(x, h; kwargs...)
+    return cyclethreshold(x, h; kwargs...)
 end
 
 """
@@ -73,7 +73,7 @@ function sdm(x::AbstractVector; parabolic_interp::Bool = false)
     n = length(x)
     d2x = zeros(n)
     for i in 1:n
-        for (jj, j) in Iterators.enumerate(-3:3)
+        for (jj, j) in enumerate(-3:3)
             if (i + j) < 1
                 val = left_padding
             elseif (i + j) > n
@@ -102,7 +102,7 @@ function _count_svdvals(S, atol::Real, rtol::Real)
     tol = max(rtol * S[1], atol)
     return iszero(S[1]) ? 0 : searchsortedlast(S, tol, rev = true)
 end
-function _pinv(F::SVD{T}; atol::Real = 0, rtol::Real = (eps(real(float(oneunit(T))))*min(size(F)...)) * iszero(atol)) where {T}
+function _pinv(F::SVD{T}; atol::Real = 0, rtol::Real = (eps(real(float(oneunit(T)))) * min(size(F)...)) * iszero(atol)) where {T}
     k = _count_svdvals(F.S, atol, rtol)
     # copies, not views: the product of reversed views falls back to a generic matmul that juliac cannot trim
     return F.V[:, k:-1:1] * Diagonal(inv.(F.S[k:-1:1])) * F.U[:, k:-1:1]'
@@ -140,7 +140,7 @@ function _median!(v::AbstractVector{<:AbstractFloat})
     any(isnan, v) && return eltype(v)(NaN)
     h = length(v) ÷ 2
     isodd(length(v)) && return partialsort!(v, h + 1)
-    s = partialsort!(v, h:h+1)
+    s = partialsort!(v, h:(h + 1))
     return (s[1] + s[2]) / 2
 end
 
@@ -171,7 +171,7 @@ end
 # Iteratively reweighted least squares from β with weight function `wfun(u)` of the standardised residuals
 # u = r / (s √(1 - h)), where s is the MAD of the residuals and h the leverages.
 # Returns (β, w, converged), with w the final weights.
-function _irls(wfun, X, y, β, h; maxiter = 100, tol = 1e-8)
+function _irls(wfun::F, X, y, β, h; maxiter = 100, tol = 1.0e-8) where {F} # F: force specialisation, needed by juliac
     w = ones(length(y))
     for _ in 1:maxiter
         r = y - X * β

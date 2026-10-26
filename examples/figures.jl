@@ -16,19 +16,19 @@ const MARKERS = Dict("Birch" => :circle, "Logistic" => :rect, "Richards" => :dia
 d = qpcRDataset("dil4reps94")
 data = d[:, 2:end]
 names = d.colnames[2:end]
-# column FX_Y: X is the dilution group; F15 amplifies first, so log₁₀(1/X) is the relative template amount
-logdil = [-log10(parse(Int, split(split(nm, "_")[1], "F")[2])) for nm in names]
+# column FX_Y: X is the number of template molecules
+logcopies = [log10(parse(Int, split(split(nm, "_")[1], "F")[2])) for nm in names]
 keep = map(!isnoise, eachcol(data))
 all(keep) || @warn "$(count(!, keep)) curves show no amplification and are left out"
-data, names, logdil = data[:, keep], names[keep], logdil[keep]
+data, names, logcopies = data[:, keep], names[keep], logcopies[keep]
 
 fits = Dict(name => [M(Vector(y)) for y in eachcol(data)] for (name, M) in MODELS)
 foreach(ms -> foreach(fit!, ms), values(fits))
 
 ### Figure 1: the four models fitted to one typical curve
 
-# typical curve: median Birch reduced χ² within the F150 group
-group = findall(nm -> startswith(nm, "F150_"), names)
+# typical curve: median Birch reduced χ² within the F1500 group
+group = findall(nm -> startswith(nm, "F1500_"), names)
 χ²ν = map(reducedchisq, fits["Birch"][group])
 j = group[sortperm(χ²ν)[cld(length(group), 2)]]
 y = data[:, j]
@@ -71,8 +71,10 @@ pos = xdata .> 0
 scatter!(ax3, cycles[pos], log10.(xdata[pos]); color = :black, markersize = 9, label = "Data (Birch baseline and scale)")
 for (name, l) in (("Birch", log10xB), ("Richards", log10xR))
     m = fits[name][j]
-    lines!(ax3, c, l; color = COLORS[name], linestyle = LINESTYLES[name], linewidth = 2,
-           label = "$name, log₁₀ x₀ = $(round(get_logx0(m) / log(10); digits = 1))")
+    lines!(
+        ax3, c, l; color = COLORS[name], linestyle = LINESTYLES[name], linewidth = 2,
+        label = "$name, log₁₀ x₀ = $(round(get_logx0(m) / log(10); digits = 1))"
+    )
 end
 ylims!(ax3, -12, 0.5)
 axislegend(ax3; position = :rb)
@@ -85,11 +87,13 @@ for (k, (name, _)) in enumerate(MODELS)
     ms = fits[name]
     logx0 = map(m -> get_logx0(m) / log(10), ms)
     ok = map(hasconverged, ms)
-    cal = calibration(exp10.(logdil), ms) # robust (bisquare) fit of the converged models
-    ax = Axis(fig[fldmod1(k, 2)...]; xticks = -5:1:-1, title = name,
-              xlabel = L"\log_{10}(1/\mathrm{dilution})", ylabel = L"\log_{10}(x_0)")
-    scatter!(ax, logdil[ok], logx0[ok]; color = (COLORS[name], 0.6), marker = MARKERS[name], markersize = 9)
-    any(.!ok) && scatter!(ax, logdil[.!ok], logx0[.!ok]; color = :black, marker = :xcross, markersize = 10, label = "Not converged ($(count(!, ok)))")
+    cal = calibration(exp10.(logcopies), ms) # robust (bisquare) fit of the converged models
+    ax = Axis(
+        fig[fldmod1(k, 2)...]; xticks = 1:4, title = name,
+        xlabel = L"\log_{10}(\mathrm{molecules})", ylabel = L"\log_{10}(x_0)"
+    )
+    scatter!(ax, logcopies[ok], logx0[ok]; color = (COLORS[name], 0.6), marker = MARKERS[name], markersize = 9)
+    any(.!ok) && scatter!(ax, logcopies[.!ok], logx0[.!ok]; color = :black, marker = :xcross, markersize = 10, label = "Not converged ($(count(!, ok)))")
     ablines!(ax, cal.intercept, cal.slope; color = :black, linestyle = :dash, label = "Slope $(round(cal.slope; digits = 3))\nR² $(round(cal.r2; digits = 3))")
     axislegend(ax; position = (cal.slope > 0 ? :lt : :lb))
 end

@@ -4,6 +4,8 @@ using qPCRModels: RichardsLogistic
 using LogExpFunctions: logistic, log1mexp
 using Random
 using Statistics
+using Printf: @sprintf
+using Aqua
 
 # Exact Birch curve: bisection on the implicit solution ln x - (1 + b) ln(1 - x) = ln(2) (c - tₘ + b).
 # Independent of the package root finder, so it can serve as ground truth.
@@ -32,12 +34,20 @@ col(name, c) = (d = qpcRDataset(name); d[:, findfirst(==(c), d.colnames)])
 const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
 
 @testset "qPCRModels.jl Package Tests" begin
+    @testset "Aqua" begin
+        Aqua.test_all(qPCRModels)
+    end
+
     @testset "Datasets" begin
         ds = qpcRDataset("batsch1")
         @test size(ds, 2) == length(ds.colnames) == 16 # cycles + 5 dilutions × 3 replicates
         @test ds.colnames[1] == "Cycles"
         @test ds[:, 1] == 1:size(ds, 1)
         @test ds.details == DatasetDetails["batsch1"]
+        # dil4reps94: copy numbers corrected (reversed in qpcR), so the curves come up later with fewer copies
+        ds = qpcRDataset("dil4reps94")
+        hac_of(g) = median(hac(ds[:, j]; linear_interp = true) for j in 2:size(ds, 2) if startswith(ds.colnames[j], g * "_"))
+        @test hac_of("F15000") < hac_of("F1500") < hac_of("F150") < hac_of("F15")
 
         files = Set(first(splitext(f)) for f in readdir(joinpath(pkgdir(qPCRModels), "qpcR_datasets")) if endswith(f, ".txt"))
         @test files == Set(keys(DatasetDetails))
@@ -46,16 +56,17 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test Set(keys(all32)) == Set(keys(DatasetDetails))
         @test eltype(all32["boggy"]) == Float32
         @test all32["boggy"] ≈ qpcRDataset("boggy")
+        @test qpcRDataset{Float32}("boggy") == all32["boggy"]
 
         @test_throws Exception qpcRDataset("not_a_dataset")
     end
 
     @testset "Utility functions" begin
         y = [0.0, 1.0, 2.0, 3.0, 4.0]
-        @test cycletreshold(y, 2.5) == 4
-        @test cycletreshold(y, 2.5; linear_interp = true) ≈ 3.5
-        @test cycletreshold(y, 0.0; linear_interp = true) == 1 # reached at the first cycle
-        @test isnan(cycletreshold(y, 10.0)) # never reached
+        @test cyclethreshold(y, 2.5) == 4
+        @test cyclethreshold(y, 2.5; linear_interp = true) ≈ 3.5
+        @test cyclethreshold(y, 0.0; linear_interp = true) == 1 # reached at the first cycle
+        @test isnan(cyclethreshold(y, 10.0)) # never reached
 
         @test hac(collect(0.0:10.0); linear_interp = true) ≈ 6.0 # 50% of the range is reached at cycle 6
 
@@ -76,7 +87,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         flat = 1.0 .+ 0.01 .* sin.(7.3 .* (1:40)) # deterministic baseline wobble
         @test isnoise(flat)
         @test !isnoise(qpcRDataset("batsch1")[:, 2])
-        @test isnoise(qpcRDataset("batsch1")[:, 2]; detection_threshold = 1e6)
+        @test isnoise(qpcRDataset("batsch1")[:, 2]; detection_threshold = 1.0e6)
     end
 
     @testset "Solvers" begin
@@ -84,7 +95,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test x ≈ sqrt(2)
         x, _ = newtsafe_rootfinding(x -> x^2, x -> 2x, 0.0, 2.0; offset = -3.0) # solves x² = 3
         @test x ≈ sqrt(3)
-        @test_throws AssertionError newtsafe_rootfinding(x -> x^2 + 1, x -> 2x, 0.0, 2.0)
+        @test_throws ArgumentError newtsafe_rootfinding(x -> x^2 + 1, x -> 2x, 0.0, 2.0)
         # root within one ulp of a large bracket end (MAK2 trial step): used to spin until RFmaxiter, as eps(z) > RFtol
         z₀ = 38.617540143048885
         z, converged = @test_logs newtsafe_rootfinding(z -> qPCRModels.expinti(z) - qPCRModels.expinti(z₀), z -> exp(z) / z, z₀, 42.8; x₀ = z₀, offset = -5 * log(2))
@@ -122,21 +133,21 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             m = BirchModel(2.0 .+ 10.0 .* birch_x.(1:N, b, tₘ))
             fit!(m)
             @test hasconverged(m)
-            @test collect(get_params(m)) ≈ [b, tₘ] atol = 1e-8
-            @test get_logx0(m) ≈ log(birch_x(0, b, tₘ)) atol = 1e-8
+            @test collect(get_params(m)) ≈ [b, tₘ] atol = 1.0e-8
+            @test get_logx0(m) ≈ log(birch_x(0, b, tₘ)) atol = 1.0e-8
             @test get_linearparams(m) .* m.σ ≈ [2.0, 10.0] # baseline and scale
         end
 
         a, tₘ = 0.55, 21.0
         m = LogisticModel(2.0 .+ 10.0 .* logistic.(a .* ((1:45) .- tₘ)))
         fit!(m)
-        @test collect(get_params(m)) ≈ [a, tₘ] atol = 1e-8
+        @test collect(get_params(m)) ≈ [a, tₘ] atol = 1.0e-8
         @test get_x0(m) ≈ logistic(-a * tₘ)
 
         a, tₘ, ν = 0.6, 23.0, 0.4
         m = RichardsModel(2.0 .+ 10.0 .* RichardsLogistic.(a .* ((1:45) .- tₘ), ν))
         fit!(m)
-        @test collect(get_params(m)) ≈ [a, tₘ, ν] atol = 1e-5
+        @test collect(get_params(m)) ≈ [a, tₘ, ν] atol = 1.0e-5
     end
 
     @testset "Birch with b = 0 is the logistic with a = ln 2" begin
@@ -145,9 +156,9 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         mb, ml = BirchModel(y), LogisticModel(y)
         fit!(mb)
         fit!(ml)
-        @test get_params(mb)[1] ≈ 0 atol = 1e-8
-        @test get_logx0(mb) ≈ get_logx0(ml) atol = 1e-8
-        @test get_cy0(mb) ≈ get_cy0(ml) atol = 1e-8
+        @test get_params(mb)[1] ≈ 0 atol = 1.0e-8
+        @test get_logx0(mb) ≈ get_logx0(ml) atol = 1.0e-8
+        @test get_cy0(mb) ≈ get_cy0(ml) atol = 1.0e-8
         @test get_predicted(mb) ≈ get_predicted(ml)
     end
 
@@ -158,7 +169,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             m = BirchModel(y)
             m.params .= [log1p(b), tₘ]
             z₀ = get_logx0(m)
-            @test z₀ - (1 + b) * log1mexp(z₀) ≈ log(2) * (b - tₘ) atol = 1e-8
+            @test z₀ - (1 + b) * log1mexp(z₀) ≈ log(2) * (b - tₘ) atol = 1.0e-8
             @test get_x0(m) ≈ exp(z₀) # used to lose accuracy for late curves (absolute tolerance in x)
         end
     end
@@ -166,7 +177,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
     @testset "Birch saturating curves freeze on the plateau" begin
         # b → -1 (no re-annealing) reaches the plateau abruptly; values used to turn NaN in the VarPro matrix
         y = qpcRDataset("batsch1")[:, 2]
-        for b in (-0.999, -1 + 1e-12), tₘ in (5.0, 20.0)
+        for b in (-0.999, -1 + 1.0e-12), tₘ in (5.0, 20.0)
             m = BirchModel(y)
             m.params .= [log1p(b), tₘ]
             r, J = residualsJacobian(m)
@@ -181,13 +192,13 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         y = qpcRDataset("batsch1")[:, 2]
         m = BirchModel(y)
         m.params .= [log1p(2.0), 24.0]
-        @test get_cy0(m) ≈ cy0_numeric(c -> birch_x(c, 2.0, 24.0)) atol = 1e-6
+        @test get_cy0(m) ≈ cy0_numeric(c -> birch_x(c, 2.0, 24.0)) atol = 1.0e-6
         m = LogisticModel(y)
         m.params .= [log(0.5), 22.0]
-        @test get_cy0(m) ≈ cy0_numeric(c -> logistic(0.5 * (c - 22.0))) atol = 1e-6
+        @test get_cy0(m) ≈ cy0_numeric(c -> logistic(0.5 * (c - 22.0))) atol = 1.0e-6
         m = RichardsModel(y)
         m.params .= [log(0.6), 23.0, log(0.4)]
-        @test get_cy0(m) ≈ cy0_numeric(c -> RichardsLogistic(0.6 * (c - 23.0), 0.4)) atol = 1e-6
+        @test get_cy0(m) ≈ cy0_numeric(c -> RichardsLogistic(0.6 * (c - 23.0), 0.4)) atol = 1.0e-6
     end
 
     @testset "Residuals, χ² and information criteria" begin
@@ -198,16 +209,19 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             @test get_linearparams(m) == m.linearparams # computed on demand before fitting
             @test length(r0) == size(m.xmat, 1)
             @test isfinite(chisq(m))
-            ModelType in (BirchModel, MAK2Model) && @test isfinite(chisq(m; RFtol = 1e-12)) # keywords used to throw
+            @test isfinite(chisq(m; RFtol = 1.0e-12)) # root-finding keywords are accepted by every model
             fit!(m)
             n, k = size(m.xmat, 1), length(m.params) + length(m.linearparams)
             r = residuals(m)
-            @test sum(abs2, r) ≈ chisq(m) rtol = 1e-6
+            @test sum(abs2, r) ≈ chisq(m) rtol = 1.0e-6
             @test residuals(m; scaled = false) ≈ y[1:n] .- get_predicted(m; scaled = false)
             @test residuals(m; scaled = false) ≈ m.σ .* r
             @test get_predicted(m; scaled = false) ≈ m.σ .* get_predicted(m)
             @test reducedchisq(m) ≈ chisq(m) / (n - k)
             @test AICc(m) ≈ n * log(chisq(m) / n) + 2k + n * (1 + log(2π)) + 2 * (k^2 + k) / (n - k - 1)
+            fit!(m; RFtol = 1.0e-12)
+            @test isfitted(m)
+            @test all(isfinite, get_stderrors(m; RFtol = 1.0e-12))
         end
     end
 
@@ -226,13 +240,13 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
     @testset "Parameters outside Float64 range" begin
         y = qpcRDataset("batsch1")[:, 2]
         m = BirchModel(y)
-        m.params .= [1e6, 20.0] # b = expm1(1e6) overflows
+        m.params .= [1.0e6, 20.0] # b = expm1(1e6) overflows
         @test all(isnan, get_linearparams!(m))
         r, _ = residualsJacobian(m)
         @test all(isinf, r) # LevenbergMarquardt! rejects such a step
 
         m = MAK2Model(y)
-        m.params .= [1e4] # x₀ = e¹⁰⁰⁰⁰
+        m.params .= [1.0e4] # x₀ = e¹⁰⁰⁰⁰
         @test all(isnan, get_linearparams!(m))
         r, _ = residualsJacobian(m)
         @test all(isinf, r)
@@ -240,7 +254,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
 
     @testset "MAK2 x₀ proportional to template on recursion data" begin
         # noise-free curves from the MAK2 recursion xₙ = xₙ₋₁ + ln(1 + xₙ₋₁) for a 4-fold dilution series
-        x0s = 1e-3 ./ 4.0 .^ (0:4)
+        x0s = 1.0e-3 ./ 4.0 .^ (0:4)
         logx0 = map(x0s) do x0
             m = MAK2Model(1.0 .+ 10.0 .* accumulate((x, _) -> x + log1p(x), 1:40; init = x0))
             fit!(m)
@@ -253,7 +267,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
     @testset "MAK2 fitting window" begin
         y = qpcRDataset("boggy")[:, 2]
         m = MAK2Model(y)
-        @test_throws AssertionError update_n!(m, 4) # 3 parameters and AICc need n ≥ 5
+        @test_throws ArgumentError update_n!(m, 4) # 3 parameters and AICc need n ≥ 5
         update_n!(m, 12)
         @test m.n == 12
         @test size(m.xmat, 1) == 12
@@ -300,13 +314,13 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             # analytic gradient of ln x₀ against central differences
             p = copy(m.params)
             g = map(eachindex(p)) do k
-                h = 1e-6 * max(1, abs(p[k]))
+                h = 1.0e-6 * max(1, abs(p[k]))
                 m.params .= p; m.params[k] += h; up = get_logx0(m)
                 m.params .= p; m.params[k] -= h; dn = get_logx0(m)
                 (up - dn) / 2h
             end
             m.params .= p
-            @test qPCRModels._logx0_gradient(m) ≈ g rtol = 1e-6
+            @test qPCRModels._logx0_gradient(m) ≈ g rtol = 1.0e-6
         end
         # standard errors match the spread of refits on curves simulated around the fit
         m = BirchModel(y)
@@ -358,11 +372,11 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         cols = [findfirst(==("$(g)_$(r)"), ds.colnames) for g in ("F15", "F150", "F1500", "F15000") for r in 1:5]
         models = [BirchModel(ds[:, j]) for j in cols]
         foreach(fit!, models[2:end])
-        rel = [1 / parse(Int, split(ds.colnames[j], "_")[1][2:end]) for j in cols] # F15 holds the most template
-        cal = calibration(rel, models)
+        copies = [parse(Float64, split(ds.colnames[j], "_")[1][2:end]) for j in cols]
+        cal = calibration(copies, models)
         @test !cal.used[1] && all(cal.used[2:end])
         @test cal.slope ≈ 1 atol = 0.05
-        @test quantify(cal, models[end]) ≈ rel[end] rtol = 0.3
+        @test quantify(cal, models[end]) ≈ copies[end] rtol = 0.3
     end
 
     @testset "Display" begin
@@ -379,7 +393,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             # the first digits of the values line up
             lines = filter(l -> occursin(" ± ", l), split(txt, "\n"))
             @test length(unique(textwidth(l[1:prevind(l, findfirst(isdigit, l[3:end]) + 2)]) for l in lines)) == 1
-            @test sprint(show, m) == string(nameof(ModelType), "(", sprint(show, m)[length(string(nameof(ModelType))) + 2:end])
+            @test sprint(show, m) == string(nameof(ModelType), "(", sprint(show, m)[(length(string(nameof(ModelType))) + 2):end])
             @test endswith(sprint(show, m), "converged)")
         end
         @test occursin("no amplification", plain(BirchModel(1.0 .+ 0.01 .* sin.(7.3 .* (1:40)))))
@@ -394,8 +408,10 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
     @testset "Drifting curves that pass isnoise do not crash" begin
         # smooth baseline drift without amplification: LM used to step out of Float64 range (Birch)
         # or hit an exactly singular damped Hessian (Richards)
-        for (name, c, ModelType) in (("htPCR", "P48.W12", BirchModel), ("vermeulen1", "CPSG3.1495", BirchModel),
-                                     ("htPCR", "P67.W91", RichardsModel))
+        for (name, c, ModelType) in (
+                ("htPCR", "P48.W12", BirchModel), ("vermeulen1", "CPSG3.1495", BirchModel),
+                ("htPCR", "P67.W91", RichardsModel),
+            )
             m = ModelType(col(name, c))
             fit!(m)
             @test isfitted(m)
@@ -414,6 +430,11 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test_throws cli.CLIError cli.parse_args(["a", "--bogus"])
         @test_throws cli.CLIError cli.parse_args(["a", "-m"])
         @test_throws cli.CLIError cli.parse_args(["a", "-o"])
+        opts = cli.parse_args(["a", "--standards", "std.csv", "--fixed-slope"])
+        @test opts.standards == "std.csv" && opts.fixed_slope && opts.robust
+        @test isempty(cli.parse_args(["a"]).standards) && !cli.parse_args(["a"]).fixed_slope
+        @test !cli.parse_args(["a", "--no-robust"]).robust
+        @test_throws cli.CLIError cli.parse_args(["a", "-s"])
 
         dir = mktempdir()
         amp = 1.0 .+ 10.0 .* logistic.(0.6 .* ((1:40) .- 22.0)) .+ 0.01 .* sin.(3.1 .* (1:40))
@@ -435,6 +456,16 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         empty = joinpath(dir, "empty.csv")
         write(empty, "\n")
         @test_throws cli.CLIError cli.load_custom_file(empty)
+
+        stdfile = joinpath(dir, "std.csv")
+        write(stdfile, "curve,copies\nA,100\nB,1e3\n")
+        @test cli.load_standards(stdfile) == (["A", "B"], [100.0, 1000.0]) # header skipped
+        write(stdfile, "A\t100\nB\t1000\n")
+        @test cli.load_standards(stdfile) == (["A", "B"], [100.0, 1000.0]) # no header
+        for bad in ("A,100\nB,abc\n", "A,100\nB,-5\n", "A,100\nA,1000\n", "A,100,3\n", "curve,copies\n")
+            write(stdfile, bad)
+            @test_throws cli.CLIError cli.load_standards(stdfile)
+        end
 
         # end-to-end runs in a separate process, with the test environment
         function run_cli(args...)
@@ -462,7 +493,7 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test fields[1] == "F1.1" && fields[2] == "Converged"
         ref = BirchModel(qpcRDataset("boggy")[:, 2])
         fit!(ref)
-        @test parse(Float64, fields[4]) ≈ get_logx0(ref) atol = 1e-5 # same fit as the package
+        @test parse(Float64, fields[4]) ≈ get_logx0(ref) atol = 1.0e-5 # same fit as the package
 
         csv = joinpath(dir, "custom.csv")
         res = run_cli(joinpath(dir, "curves.tsv"), "-m", "logistic", "-o", csv)
@@ -470,5 +501,40 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
         @test startswith.(readlines(csv)[2:3], ("A,Converged,", "B,No amplification (Noise),N/A")) == [true, true]
         res = run_cli(joinpath(dir, "curves.tsv"), "-m", "logistic", "--fit-noise", "-o", csv)
         @test !occursin("No amplification", read(csv, String))
+
+        # absolute quantification: dil4reps94 columns are FX_Y, X = copy number
+        ds = qpcRDataset("dil4reps94")
+        std_names = [c for c in ds.colnames[2:end] if parse(Int, split(c, '_')[2]) <= 3]
+        std_q = [parse(Float64, split(c, '_')[1][2:end]) for c in std_names]
+        write(stdfile, "curve,quantity\n" * join((n * "," * string(q) for (n, q) in zip(std_names, std_q)), "\n"))
+        csv = joinpath(dir, "quant.csv")
+        res = run_cli("dil4reps94", "-s", stdfile, "-o", csv)
+        @test res.code == 0 && occursin("Standard curve:", res.out) && occursin("Quantity", res.out)
+        rows = split.(readlines(csv), ',')
+        @test rows[1][(end - 1):end] == ["Known_quantity", "Quantity"]
+        q = Dict(r[1] => r[end] == "N/A" ? NaN : parse(Float64, r[end]) for r in rows[2:end])
+        for (group, expected) in (("F15_", 15.0), ("F150_", 150.0), ("F1500_", 1500.0), ("F15000_", 15000.0))
+            @test 0.5 < median(filter(isfinite, [v for (k, v) in q if startswith(k, group)])) / expected < 2
+        end
+        # same standard curve as the package
+        models = [BirchModel(ds[:, findfirst(==(n), ds.colnames)]) for n in std_names]
+        foreach(fit!, models)
+        cal = calibration(std_q, models)
+        @test occursin(@sprintf("slope     = %.4f", cal.slope), res.out)
+        res = run_cli("dil4reps94", "-s", stdfile, "--fixed-slope")
+        @test res.code == 0 && occursin("slope     = 1 (fixed)", res.out)
+        res = run_cli("dil4reps94", "-s", stdfile, "--no-robust")
+        cal = calibration(std_q, models; robust = false)
+        @test res.code == 0 && occursin("least-squares fit", res.out) && !occursin("outliers", res.out)
+        @test occursin(@sprintf("slope     = %.4f", cal.slope), res.out)
+
+        write(stdfile, "F15_1,15\nnot_a_curve,10\n")
+        res = run_cli("dil4reps94", "-s", stdfile)
+        @test res.code == 1 && occursin("Standard 'not_a_curve' is not a curve", res.err)
+        write(stdfile, "F15_1,15\nF150_1,150\n")
+        res = run_cli("dil4reps94", "-s", stdfile)
+        @test res.code == 1 && occursin("needs at least 3 converged standards", res.err)
+        res = run_cli("dil4reps94", "-s", joinpath(dir, "missing_std.csv"))
+        @test res.code == 1 && occursin("Error loading standards file", res.err)
     end
 end

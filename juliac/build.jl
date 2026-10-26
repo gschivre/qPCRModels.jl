@@ -12,13 +12,15 @@ const ROOT = dirname(@__DIR__)
 const BUNDLE = joinpath(@__DIR__, "qpcr_fit")
 
 rm(BUNDLE; force = true, recursive = true)
-JuliaC.main([
-    "--output-exe", "qpcr_fit",
-    "--project", ROOT,
-    "--bundle", BUNDLE,
-    "--trim=safe", "--experimental",
-    joinpath(ROOT, "bin", "qpcr_fit.jl"),
-])
+JuliaC.main(
+    [
+        "--output-exe", "qpcr_fit",
+        "--project", ROOT,
+        "--bundle", BUNDLE,
+        "--trim=safe", "--experimental",
+        joinpath(ROOT, "bin", "qpcr_fit.jl"),
+    ]
+)
 cp(joinpath(ROOT, "qpcR_datasets"), joinpath(BUNDLE, "share", "qpcR_datasets"))
 cp(joinpath(ROOT, "LICENSE"), joinpath(BUNDLE, "share", "LICENSE"))
 println("Executable: ", joinpath(BUNDLE, "bin", "qpcr_fit"))

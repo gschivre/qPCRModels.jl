@@ -43,8 +43,10 @@ function Base.show(io::IO, ::MIME"text/plain", nlm::NonLinearLeastSquare)
     se = get_stderrors(nlm)
     p = get_params(nlm)
     rows = Tuple{String, Float64, Union{Nothing, Float64}}[(String(k), p[i], se[k]) for (i, k) in enumerate(_param_names(nlm))]
-    push!(rows, ("F_bg", nlm.σ * nlm.linearparams[1], se.F_bg), ("F_max", nlm.σ * nlm.linearparams[2], se.F_max),
-          ("log₁₀ x₀", get_logx0(nlm) / log(10), se.logx0 / log(10)))
+    push!(
+        rows, ("F_bg", nlm.σ * nlm.linearparams[1], se.F_bg), ("F_max", nlm.σ * nlm.linearparams[2], se.F_max),
+        ("log₁₀ x₀", get_logx0(nlm) / log(10), se.logx0 / log(10))
+    )
     nlm isa MAK2Model || push!(rows, ("Cy₀", get_cy0(nlm), nothing))
     _print_table(io, rows)
     # residual standard error in fluorescence units, more telling than χ²ν on the standardised data

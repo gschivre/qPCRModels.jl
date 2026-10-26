@@ -54,7 +54,7 @@ mutable struct BirchModel{T} <: NonLinearLeastSquare
         n = length(data)
         σ = std(data)
         noamp = isnoise(data; detection_threshold)
-        return new{T}(data, data ./ σ, σ, init_params, NaN * Vector{Float64}(undef, 2), NaN, false, false, noamp, ones(n, 2))
+        return new{T}(data, data ./ σ, σ, init_params, fill(NaN, 2), NaN, false, false, noamp, ones(n, 2))
     end
 end
 
@@ -79,10 +79,10 @@ function _get_logx0_start(b, tₘ)
         if tₘ > 0
             return -log(2) * (tₘ + 1)
         else
-            return -1e-9
+            return -1.0e-9
         end
     else
-        return min(-1e-9, loglogistic(-log(2) * tₘ))
+        return min(-1.0e-9, loglogistic(-log(2) * tₘ))
     end
 end
 
@@ -230,7 +230,7 @@ mutable struct LogisticModel{T} <: NonLinearLeastSquare
         n = length(data)
         σ = std(data)
         noamp = isnoise(data; detection_threshold)
-        return new{T}(data, data ./ σ, σ, init_params, NaN * Vector{Float64}(undef, 2), NaN, false, false, noamp, ones(n, 2))
+        return new{T}(data, data ./ σ, σ, init_params, fill(NaN, 2), NaN, false, false, noamp, ones(n, 2))
     end
 end
 
@@ -253,7 +253,7 @@ end
 
 Compute linear scale and baseline offset parameters for `LogisticModel` via linear least squares on the feature matrix `xmat`.
 """
-function get_linearparams!(nlm::LogisticModel)
+function get_linearparams!(nlm::LogisticModel; kwargs...)
     a, tₘ = get_params(nlm)
     for i in eachindex(nlm.data)
         nlm.xmat[i, 2] = logistic(a * (i - tₘ))
@@ -261,7 +261,7 @@ function get_linearparams!(nlm::LogisticModel)
     nlm.linearparams .= nlm.xmat \ nlm.data
     return nlm.linearparams
 end
-get_linearparams_filtkwargs!(nlm::LogisticModel; kwargs...) = get_linearparams!(nlm; filter_kwargs(kwargs, ())...)
+get_linearparams_filtkwargs!(nlm::LogisticModel; kwargs...) = get_linearparams!(nlm)
 
 """
     get_x0(nlm::LogisticModel)
@@ -294,7 +294,7 @@ function get_cy0(nlm::LogisticModel)
     return tₘ - 2 / a
 end
 
-function _curve_jacobian!(J, nlm::LogisticModel)
+function _curve_jacobian!(J, nlm::LogisticModel; kwargs...)
     a, tₘ = get_params(nlm)
     for i in eachindex(nlm.data)
         x = logistic(a * (i - tₘ))
@@ -337,7 +337,7 @@ mutable struct RichardsModel{T} <: NonLinearLeastSquare
         n = length(data)
         σ = std(data)
         noamp = isnoise(data; detection_threshold)
-        return new{T}(data, data ./ σ, σ, init_params, NaN * Vector{Float64}(undef, 2), NaN, false, false, noamp, ones(n, 2))
+        return new{T}(data, data ./ σ, σ, init_params, fill(NaN, 2), NaN, false, false, noamp, ones(n, 2))
     end
 end
 
@@ -382,7 +382,7 @@ end
 
 Compute linear scale and baseline offset parameters for `RichardsModel` via linear least squares on the feature matrix `xmat`.
 """
-function get_linearparams!(nlm::RichardsModel)
+function get_linearparams!(nlm::RichardsModel; kwargs...)
     a, tₘ, ν = get_params(nlm)
     for i in eachindex(nlm.data)
         nlm.xmat[i, 2] = RichardsLogistic(a * (i - tₘ), ν)
@@ -390,7 +390,7 @@ function get_linearparams!(nlm::RichardsModel)
     nlm.linearparams .= nlm.xmat \ nlm.data
     return nlm.linearparams
 end
-get_linearparams_filtkwargs!(nlm::RichardsModel; kwargs...) = get_linearparams!(nlm; filter_kwargs(kwargs, ())...)
+get_linearparams_filtkwargs!(nlm::RichardsModel; kwargs...) = get_linearparams!(nlm)
 
 """
     get_x0(nlm::RichardsModel)
@@ -423,7 +423,7 @@ function get_cy0(nlm::RichardsModel)
     return tₘ - (1 + ν + log(ν)) / a
 end
 
-function _curve_jacobian!(J, nlm::RichardsModel)
+function _curve_jacobian!(J, nlm::RichardsModel; kwargs...)
     a, tₘ, ν = get_params(nlm)
     for i in eachindex(nlm.data)
         logx = logRichardsLogistic(a * (i - tₘ), ν)
@@ -433,9 +433,7 @@ function _curve_jacobian!(J, nlm::RichardsModel)
         J[i, 1] = (tₘ - i) * a * dFinv
         J[i, 2] = a * dFinv
         J[i, 3] = ν * logx * exp(-log1mexp(ν * logx)) * dFinv
-        if isnan(J[i, 3])
-            J[i, 3] = 0.0
-        end
+        isnan(J[i, 3]) && (J[i, 3] = 0.0)
     end
     return true
 end
@@ -472,10 +470,10 @@ mutable struct MAK2Model{T} <: NonLinearLeastSquare
         data = _trim_trailing_nonfinite(data)
         ct = 4 + sdm(view(data, 4:length(data)); parabolic_interp = true) # minimum five point for model fitting
         init_params = [-log(2) * (ct + 1)]
-        n::Int = floor(ct)
+        n = floor(Int, ct)
         σ = std(data)
         noamp = isnoise(data; detection_threshold)
-        return new{T}(data, data ./ σ, σ, n, init_params, NaN * Vector{Float64}(undef, 2), NaN, false, false, noamp, ones(n, 2))
+        return new{T}(data, data ./ σ, σ, n, init_params, fill(NaN, 2), NaN, false, false, noamp, ones(n, 2))
     end
 end
 
@@ -560,7 +558,7 @@ end
 Update the maximum cycle count `n` considered during fitting of a `MAK2Model`.
 """
 function update_n!(nlm::MAK2Model, n::Int)
-    @assert (n > 4) "`MAK2Model` has 3 parameters (k) and AICc involves n-k-1 so n must be ≥ 5!"
+    n > 4 || throw(ArgumentError("`MAK2Model` has 3 parameters (k) and AICc involves n-k-1 so n must be ≥ 5"))
     nlm.n = n
     nlm.xmat = ones(n, 2)
     nlm.params .= -log(2) * (n + 1)
@@ -578,7 +576,7 @@ Iteratively fit a `MAK2Model` over candidate cycle bounds `n` and select the cyc
 """
 function refit!(nlm::MAK2Model; kwargs...)
     out = zeros(length(nlm.data) - 4)
-    for (i, n) in Iterators.enumerate(5:length(nlm.data)) # MAK2Model has 3 parameters (k) and AICc involves n-k-1
+    for (i, n) in enumerate(5:length(nlm.data)) # MAK2Model has 3 parameters (k) and AICc involves n-k-1
         update_n!(nlm, n)
         fit!(nlm; kwargs...)
         out[i] = AICc(nlm; filter_kwargs(kwargs, (:RFtol, :RFmaxiter))...)
@@ -697,9 +695,7 @@ Fill pre-allocated vector `r` with model residual values `y_obs - y_pred`.
 """
 function residuals!(r, nlm::NonLinearLeastSquare; scaled::Bool = true, kwargs...)
     nlm.fitted || get_linearparams!(nlm; kwargs...)
-    for i in eachindex(r)
-        r[i] = nlm.data[i]
-    end
+    copyto!(r, _fitdata(nlm))
     if scaled # on the standardized scale
         return mul!(r, nlm.xmat, nlm.linearparams, -1.0, 1.0)
     else # same scale as original data
@@ -770,7 +766,7 @@ function AICc(nlm::NonLinearLeastSquare; kwargs...)
     chi2 = chisq(nlm; kwargs...)
     n = size(nlm.xmat, 1)
     k = length(nlm.params) + length(nlm.linearparams)
-    return n * log(chi2 / n) + 2 * k + n * (1 + log(2π)) + 2 * (k ^ 2 + k) / (n - k - 1)
+    return n * log(chi2 / n) + 2 * k + n * (1 + log(2π)) + 2 * (k^2 + k) / (n - k - 1)
 end
 
 ### Standard errors
@@ -800,12 +796,12 @@ function _logx0_gradient(nlm::BirchModel; kwargs...)
     dg = 1 + (1 + b) / expm1(-z₀) # implicit differentiation of z - (1 + b) ln(1 - eᶻ) = ln(2) (b - tₘ)
     return [(1 + b) * (log(2) + log1mexp(z₀)) / dg, -log(2) / dg]
 end
-function _logx0_gradient(nlm::LogisticModel)
+function _logx0_gradient(nlm::LogisticModel; kwargs...)
     a, tₘ = get_params(nlm)
     d = logistic(a * tₘ) # d/du loglogistic(u) at u = -a tₘ
     return [-a * tₘ * d, -a * d]
 end
-function _logx0_gradient(nlm::RichardsModel)
+function _logx0_gradient(nlm::RichardsModel; kwargs...)
     a, tₘ, ν = get_params(nlm)
     d = logistic(a * tₘ) / ν # ln x₀ = loglogistic(-a tₘ) / ν
     return [-a * tₘ * d, -a * d, -get_logx0(nlm)]

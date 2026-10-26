@@ -32,4 +32,12 @@ qpcR help page (e.g. `?batsch` in R). The datasets taken from published studies 
 For the remaining datasets (`competimer`, `dil4reps94`, `dyemelt`, `htPCR`, `reps`, `reps2`,
 `reps3`, `reps384`, `testdat`), see the qpcR documentation.
 
+## Changes from qpcR
+
+- `dil4reps94`: the copy numbers in the column names are reversed in qpcR. The original publication
+  (Ruijter, J. M. et al. (2013). Evaluation of qPCR curve analysis methods for reliable biomarker discovery:
+  bias, resolution, precision, and implications. *Methods* 59, 32–46, <https://doi.org/10.1016/j.ymeth.2012.08.011>)
+  describes a dilution series from 15,000 down to 15 molecules, but in qpcR the `F15` curves come up first
+  and the `F15000` curves last. The labels are swapped here (`F15` ↔ `F15000`, `F150` ↔ `F1500`); the data are unchanged.
+
 If you use these datasets in published work, please cite qpcR and the original publication.

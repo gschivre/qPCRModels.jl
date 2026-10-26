@@ -86,17 +86,36 @@ julia --project=. bin/qpcr_fit.jl batsch1
 
 # Fit a custom dataset with MAK2 and export a CSV
 julia --project=. bin/qpcr_fit.jl path/to/data.csv --model mak2 -o results.csv
+
+# Absolute quantification with standard wells of the same run
+julia --project=. bin/qpcr_fit.jl path/to/plate.csv --standards standards.csv -o results.csv
 ```
 
 Options:
 
 - `-m, --model <name>`: `birch` (default), `logistic`, `richards` or `mak2`.
 - `-o, --output <path>`: output CSV file.
+- `-s, --standards <path>`: standards file, for absolute quantification (see below).
+- `--fixed-slope`: fix the slope of the standard curve to 1.
+- `--no-robust`: fit the standard curve by ordinary least squares, with no outlier rejection.
 - `--fit-noise`: also fit curves that are flagged as non-amplifying.
 - `-h, --help`: show help.
 
 
 The input file has one column per curve and one row per cycle, with a header line. The first column (the cycle number) is skipped unless it is the only column. Columns can be separated by tabs, commas, semicolons or spaces.
+
+The standards file lists the standard curves of the input data and their known quantities, one per line. The header line is optional:
+
+```text
+curve,copies
+F1.1,100000
+F1.2,100000
+F2.1,10000
+F2.2,10000
+F3.1,1000
+```
+
+With `--standards`, the tool fits the standard curve on these wells (as [`calibration`](@ref) does: robust fit unless `--no-robust` is given, non-converged wells left out). It prints the slope, the intercept, R² and the rejected outliers. Then it reports the quantity of every curve, standards included, in the units of the file. The CSV output gets two more columns: `Known_quantity` (standards only) and `Quantity`. You need at least 3 converged standards with at least two different quantities, or 2 with `--fixed-slope`.
 
 ### Standalone executable
 
@@ -122,4 +141,4 @@ julia --project=juliac -e 'using Pkg; Pkg.instantiate()'   # first time only
 julia --project=juliac juliac/build.jl
 ```
 
-The bundle is written to `juliac/qpcr_fit/` (about 110 MB, 35 MB compressed). It is built with `--trim=safe`, which keeps only the code that the program can reach. This only works if every call has a concrete type. That is why `bin/qpcr_fit.jl` avoids `Dict{Symbol,Any}`, chooses the model with a branch instead of a `Dict` of types, and writes to `Core.stdout`. The `Binary` workflow builds the executable on every push, so a change that breaks trimming fails in CI.
+The bundle is written to `juliac/qpcr_fit/` (about 115 MB, 39 MB compressed). It is built with `--trim=safe`, which keeps only the code that the program can reach. This only works if every call has a concrete type. That is why `bin/qpcr_fit.jl` avoids `Dict{Symbol,Any}`, chooses the model with a branch instead of a `Dict` of types, and writes to `Core.stdout`. The `Binary` workflow builds the executable on every push, so a change that breaks trimming fails in CI.

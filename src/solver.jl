@@ -23,10 +23,9 @@ Fit parameters of a non-linear least squares model `nlm` using the Levenberg-Mar
 # Returns
 - `(chisq::Float64, converged::Bool)`: Final chi-squared sum of squared residuals and convergence status flag.
 """
-function LevenbergMarquardt!(nlm::NonLinearLeastSquare; LMtol = 1e-8, LMtol_chisq = 10 * eps(), LMtol_step = 10 * eps(), Ndone = 10, LMmaxiter = 1_000, λinit = 1e-2, λdec = 2, λinc = 3, min_damping = 10 * eps(), max_dampening = 0.1 * inv(eps()), kwargs...)
+function LevenbergMarquardt!(nlm::NonLinearLeastSquare; LMtol = 1.0e-8, LMtol_chisq = 10 * eps(), LMtol_step = 10 * eps(), Ndone = 10, LMmaxiter = 1_000, λinit = 1.0e-2, λdec = 2, λinc = 3, min_damping = 10 * eps(), max_dampening = 0.1 * inv(eps()), kwargs...)
     p = nlm.params
-    p_tmp = similar(p)
-    copyto!(p_tmp, p)
+    p_tmp = copy(p)
     m = length(p)
     r, J = residualsJacobian(nlm; kwargs...) # residuals & Jacobian
     r_new = similar(r)
@@ -35,7 +34,6 @@ function LevenbergMarquardt!(nlm::NonLinearLeastSquare; LMtol = 1e-8, LMtol_chis
     chisq = sum(abs2, r) # χ² merit function value
     g = similar(p) # gradient
     Δ = similar(p)
-    δ = Inf
     done = 0
     H = zeros(eltype(p), m, m) # dampened approximate Hessian
     for _ in 1:LMmaxiter
@@ -99,7 +97,7 @@ function newtsafe_rootfinding(f, df, a, b; x₀ = (a + b) / 2, RFtol = 10 * eps(
     fb = f(b) + offset
     (abs(fa) < RFtol) && return (a, true)
     (abs(fb) < RFtol) && return (b, true)
-    @assert (fa * fb) ≤ 0 "Root not bracketed"
+    (fa * fb) ≤ 0 || throw(ArgumentError("root not bracketed"))
     # orient the search so that f(xₗ) < 0
     xₗ, xₕ = ifelse(fa > 0, (b, a), (a, b))
     x = x₀

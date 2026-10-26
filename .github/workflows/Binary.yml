@@ -40,6 +40,9 @@ jobs:
           juliac/qpcr_fit/bin/qpcr_fit --help
           juliac/qpcr_fit/bin/qpcr_fit boggy -o boggy.csv
           grep -q "F1.1,Converged" boggy.csv
+          printf 'curve,copies\nF1.1,1e6\nF1.2,1e6\nF2.1,1e5\nF2.2,1e5\nF3.1,1e4\nF3.2,1e4\n' > standards.csv
+          juliac/qpcr_fit/bin/qpcr_fit boggy -s standards.csv -o boggy_quant.csv
+          head -1 boggy_quant.csv | grep -q "Known_quantity,Quantity"
       - name: Archive
         id: archive
         shell: bash

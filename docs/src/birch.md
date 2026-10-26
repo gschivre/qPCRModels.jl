@@ -137,7 +137,7 @@ For each cycle, the equation is solved for ``\ln x`` with a safeguarded Newton s
 
 ## Comparison on real data
 
-The figures below use the `dil4reps94` dataset: four 10-fold dilutions with 94 replicates each. They are made by `examples/figures.jl`.
+The figures below use the `dil4reps94` dataset: four 10-fold dilutions, from 15,000 down to 15 molecules, with 94 replicates each. They are made by `examples/figures.jl`.
 
 ### Fit of one typical curve
 
@@ -147,9 +147,9 @@ All four models fitted to the same curve. MAK2 is fitted only up to the second-d
 
 ### Accuracy of the initial quantity
 
-If ``x_0`` is estimated correctly, ``\log_{10} x_0`` against ``\log_{10}`` of the relative template amount is a straight line with slope 1. Each panel shows the robust standard curve fitted by `calibration`.
+If ``x_0`` is estimated correctly, ``\log_{10} x_0`` against ``\log_{10}`` of the number of molecules is a straight line with slope 1. Each panel shows the robust standard curve fitted by `calibration`.
 
-![log10 x0 against dilution for the four models](assets/x0_dil4reps94.png)
+![log10 x0 against the number of molecules for the four models](assets/x0_dil4reps94.png)
 
 * **Birch** gives the slope closest to 1 and the smallest spread between replicates.
 * **Logistic** gives a slope close to 1, but with a much larger spread, especially at the lowest template amount.

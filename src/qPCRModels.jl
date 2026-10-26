@@ -13,7 +13,7 @@
   - `LevenbergMarquardt!`: Dampened non-linear least squares optimization.
   - `newtsafe_rootfinding`: Safe Newton-Raphson rootfinder with bisection fallback.
 - **Diagnostics & Metrics**:
-  - `cycletreshold`, `hac`, `sdm`: Threshold, half-amplification cycle, and second-derivative maximum estimators.
+  - `cyclethreshold`, `hac`, `sdm`: Threshold, half-amplification cycle, and second-derivative maximum estimators.
   - `isnoise`: Noise and non-amplification detection heuristic based on Median Absolute Deviation.
   - `AICc`, `chisq`, `reducedchisq`, `get_x0`, `get_logx0`: Model quality criteria and initial concentration estimators.
   - `get_stderrors`: Standard errors of the fitted parameters and of `ln(x₀)`.
@@ -41,7 +41,7 @@ include("show.jl")
 # Export public interface
 export NonLinearLeastSquare, BirchModel, LogisticModel, RichardsModel, MAK2Model
 export LevenbergMarquardt!, newtsafe_rootfinding
-export cycletreshold, hac, sdm, mad, isnoise
+export cyclethreshold, hac, sdm, mad, isnoise
 export fit!, refit!, update_n!, hasamplification, hasconverged, isfitted
 export residualsJacobian, residuals!, residuals
 export chisq, reducedchisq, AICc
