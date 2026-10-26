@@ -416,6 +416,18 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             fit!(m)
             @test isfitted(m)
         end
+        # trial steps where the curve is NaN (0/0 or Inf * 0) are rejected instead of reaching `svd`
+        y = col("htPCR", "P67.W91")
+        for (ModelType, p) in (
+                (RichardsModel, [log(2), -400.0, -800.0]), # ν underflows to 0
+                (RichardsModel, [800.0, 20.0, 0.0]), # a overflows to Inf
+                (LogisticModel, [800.0, 20.0]),
+            )
+            m = ModelType(y)
+            m.params .= p
+            r, J = residualsJacobian(m)
+            @test all(isinf, r) && iszero(J)
+        end
     end
 
     @testset "Command-line interface" begin
@@ -467,13 +479,25 @@ const ALL_MODELS = (BirchModel, LogisticModel, RichardsModel, MAK2Model)
             @test_throws cli.CLIError cli.load_standards(stdfile)
         end
 
-        # end-to-end runs in a separate process, with the test environment
+        # end-to-end runs call `main` in this process: a separate process would load and compile everything
+        # again (~6 s per run). The script writes to Core.stdout and Core.stderr, so redirect to files.
         function run_cli(args...)
-            out, err = IOBuffer(), IOBuffer()
-            cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script $args`
-            p = run(pipeline(ignorestatus(cmd); stdout = out, stderr = err))
-            return (code = p.exitcode, out = String(take!(out)), err = String(take!(err)))
+            out, err = tempname(), tempname()
+            code = open(out, "w") do o
+                open(err, "w") do e
+                    redirect_stdio(; stdout = o, stderr = e) do
+                        cli.main(collect(String, args))
+                    end
+                end
+            end
+            return (code = code, out = read(out, String), err = read(err, String))
         end
+        # one run as a program, to check the entry point and the exit code
+        errbuf = IOBuffer()
+        cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script boggy --model nope`
+        p = run(pipeline(ignorestatus(cmd); stdout = devnull, stderr = errbuf))
+        @test p.exitcode == 1 && occursin("Invalid model 'nope'", String(take!(errbuf)))
+
         res = run_cli("--help")
         @test res.code == 0 && occursin("Usage:", res.out)
         res = run_cli("boggy", "--model", "nope")

@@ -596,8 +596,10 @@ _fitdata(nlm::MAK2Model) = view(nlm.data, 1:nlm.n)
 # Compute residuals and Jacobian by Variable Projection.
 # Each model's `_curve_jacobian!(J, nlm)` fills `nlm.xmat[:, 2]` with the curve x and `J` with -∂x/∂params,
 # and returns `false` when the curve is not representable in Float64.
+# A non-finite curve or Jacobian (e.g. 0/0 when the Richards ν underflows) is treated the same way:
+# passed on, it would make `svd` throw.
 function residualsJacobian!(r, J, nlm::NonLinearLeastSquare; kwargs...)
-    if !_curve_jacobian!(J, nlm; kwargs...)
+    if !_curve_jacobian!(J, nlm; kwargs...) || !all(isfinite, nlm.xmat) || !all(isfinite, J)
         # trial step outside floating-point range: infinite χ² makes LevenbergMarquardt! reject it
         fill!(r, Inf)
         fill!(J, 0.0)
