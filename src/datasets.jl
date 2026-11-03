@@ -209,7 +209,8 @@ struct qpcRDataset{T <: AbstractFloat} <: AbstractMatrix{T}
 
     function qpcRDataset{T}(name::String) where {T <: AbstractFloat}
         filepath = joinpath(get_dataset_folder(), name * ".txt")
-        txt = split(read(filepath, String), "\n"; keepempty = false) # readlines(filepath) cannot be trimmed by juliac
+        # readlines(filepath) cannot be trimmed by juliac; "\r" is removed for files checked out with CRLF line endings
+        txt = split(replace(read(filepath, String), "\r" => ""), "\n"; keepempty = false)
         colnames = String.(split(txt[1], "\t"; keepempty = false))
         data = zeros(T, length(txt) - 1, length(colnames))
         for (i, lᵢ) in enumerate(Iterators.drop(txt, 1))
