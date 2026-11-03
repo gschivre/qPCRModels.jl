@@ -3,8 +3,9 @@
 #     julia --project=juliac -e 'using Pkg; Pkg.instantiate()'   # first time only
 #     julia --project=juliac juliac/build.jl
 #
-# The bundle is written to juliac/qpcr_fit/: the executable is bin/qpcr_fit, and it needs the lib/ folder
-# next to it, but no Julia installation. The built-in datasets are copied to share/qpcR_datasets/.
+# The bundle is written to juliac/qpcr_fit/: the executable is bin/qpcr_fit (bin/qpcr_fit.exe on Windows), and
+# it needs the libraries next to it (lib/, or bin/ on Windows), but no Julia installation. The built-in datasets
+# are copied to share/qpcR_datasets/.
 
 using JuliaC
 
@@ -23,4 +24,4 @@ JuliaC.main(
 )
 cp(joinpath(ROOT, "qpcR_datasets"), joinpath(BUNDLE, "share", "qpcR_datasets"))
 cp(joinpath(ROOT, "LICENSE"), joinpath(BUNDLE, "share", "LICENSE"))
-println("Executable: ", joinpath(BUNDLE, "bin", "qpcr_fit"))
+println("Executable: ", joinpath(BUNDLE, "bin", Sys.iswindows() ? "qpcr_fit.exe" : "qpcr_fit"))

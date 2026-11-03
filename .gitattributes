@@ -1,0 +1,2 @@
+# Keep LF line endings on Windows checkouts (the dataset files are split on "\n")
+*.txt text eol=lf
