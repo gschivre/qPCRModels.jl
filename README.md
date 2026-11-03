@@ -52,11 +52,17 @@ julia --project=. bin/qpcr_fit.jl batsch1 --model birch -o results.csv
 
 ## Standalone executable (no Julia needed)
 
-Each [release](https://github.com/gschivre/qPCRModels.jl/releases) includes a compiled version of the command-line tool for Linux and macOS. Extract the archive and run `bin/qpcr_fit` from the extracted folder:
+Each [release](https://github.com/gschivre/qPCRModels.jl/releases) includes a compiled version of the command-line tool for Linux, macOS and Windows. Extract the archive and run `bin/qpcr_fit` from the extracted folder:
 
 ```bash
-tar xzf qpcr_fit-v0.2.0-linux-x64.tar.gz
-qpcr_fit-v0.2.0-linux-x64/bin/qpcr_fit path/to/data.csv --model birch -o results.csv
+tar xzf qpcr_fit-v0.2.1-linux-x64.tar.gz
+qpcr_fit-v0.2.1-linux-x64/bin/qpcr_fit path/to/data.csv --model birch -o results.csv
+```
+
+On Windows, extract `qpcr_fit-v0.2.1-windows-x64.zip` (right click > Extract All) and run `bin\qpcr_fit.exe` in a terminal:
+
+```bat
+qpcr_fit-v0.2.1-windows-x64\bin\qpcr_fit.exe path\to\data.csv --model birch -o results.csv
 ```
 
 See the documentation for absolute quantification with standard curves, all CLI options, how to build the executable yourself, and the API reference.
