@@ -119,16 +119,24 @@ With `--standards`, the tool fits the standard curve on these wells (as [`calibr
 
 ### Standalone executable
 
-A compiled version of the command-line tool runs without Julia. Download the archive for your system (Linux x64 or macOS ARM) from the [Releases page](https://github.com/gschivre/qPCRModels.jl/releases), extract it, and run `bin/qpcr_fit`:
+A compiled version of the command-line tool runs without Julia. Download the archive for your system (Linux x64, macOS ARM or Windows x64) from the [Releases page](https://github.com/gschivre/qPCRModels.jl/releases), extract it, and run `bin/qpcr_fit`:
 
 ```bash
-tar xzf qpcr_fit-v0.2.0-linux-x64.tar.gz
-cd qpcr_fit-v0.2.0-linux-x64
+tar xzf qpcr_fit-v0.2.1-linux-x64.tar.gz
+cd qpcr_fit-v0.2.1-linux-x64
 bin/qpcr_fit batsch1
 bin/qpcr_fit path/to/data.csv --model mak2 -o results.csv
 ```
 
-It takes the same arguments and options as `bin/qpcr_fit.jl`. Keep the extracted folder together: the executable needs the `lib/` folder next to it, and reads the built-in datasets from `share/qpcR_datasets/`. To call it from anywhere, add the `bin/` folder to your `PATH` instead of moving the executable.
+On Windows, the archive is a `.zip` file (right click > Extract All) and the executable is `bin\qpcr_fit.exe`:
+
+```bat
+cd qpcr_fit-v0.2.1-windows-x64
+bin\qpcr_fit.exe batsch1
+bin\qpcr_fit.exe path\to\data.csv --model mak2 -o results.csv
+```
+
+It takes the same arguments and options as `bin/qpcr_fit.jl`. Keep the extracted folder together: the executable needs the libraries next to it (the `lib/` folder, or the DLL files in `bin/` on Windows), and reads the built-in datasets from `share/qpcR_datasets/`. To call it from anywhere, add the `bin/` folder to your `PATH` instead of moving the executable.
 
 The executable starts in a few milliseconds: fitting all 375 curves of `dil4reps94` takes about 0.2 s, compared with about 8 s for `julia bin/qpcr_fit.jl`, which must compile the code first.
 
