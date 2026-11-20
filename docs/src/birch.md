@@ -2,13 +2,45 @@
 
 ## Why the Birch model?
 
-Mechanistic models such as MAK2 (Boggy & Woolf, *PLoS ONE* 2010) estimate the initial target quantity directly from reaction kinetics, with no standard curve and no efficiency assumption from a threshold. However, MAK2 describes only the start of the reaction, so it must be truncated near the second-derivative maximum and ignores most of the data. Empirical sigmoids (4PL/5PL) fit the whole curve, but their parameters have no physical meaning, so ``x_0`` cannot be read from them in a principled way.
+Mechanistic models such as MAK2 [BoggyWoolf2010](@cite) estimate the initial target quantity directly from reaction kinetics, with no standard curve and no efficiency assumption from a threshold. However, MAK2 describes only the start of the reaction, so it must be truncated near the second-derivative maximum and ignores most of the data. Empirical sigmoids (4PL/5PL) fit the whole curve, but their parameters have no physical meaning, so ``x_0`` cannot be read from them in a principled way.
 
 The Birch model has the strengths of both:
 
 * it is **derived from the PCR reaction scheme** (primer annealing competing with template re-annealing), so its parameters have a physical meaning;
 * it describes **the whole curve**, from the exponential phase through the slowdown and up to the plateau, so every cycle informs the fit;
 * it needs just **two non-linear parameters** (``b`` and ``t_m``). This is the same number as the 4PL, and one fewer than the 5PL, yet the curve can still be asymmetric.
+
+### How much does a small efficiency error matter?
+
+Threshold methods compute the initial quantity as ``N_0 = N_q / (1 + E)^{C_t}``, with the efficiency ``E`` taken from a calibration curve. The error on ``E`` is raised to the power ``C_t``:
+
+```math
+\frac{\delta N_0}{N_0} \approx C_t \, \frac{\delta E}{1 + E}
+```
+
+A calibration curve with ``R^2 = 0.999`` looks excellent, but it does not fix ``E`` precisely. For a 10-fold dilution series with a true efficiency of 100%:
+
+| Calibration design | 95% CI of ``E`` | Fold error on ``N_0`` at ``C_t = 25`` (95%) |
+|---|---|---|
+| 5 points, 1 replicate | ±8.1% | ×2.7 |
+| 5 points, 3 replicates | ±2.6% | ×1.4 |
+
+A simulation gives the same picture: among 5-point curves with ``R^2 \ge 0.999``, the estimated efficiency still spans 95%–105%, and one curve in 20 gives an error of ×1.9 or more on ``N_0`` at ``C_t = 25``. For comparison, 95% instead of 100% efficiency at ``C_t = 25`` gives ``(2/1.95)^{25} \approx 1.9``. This point is known [Svec2015](@cite), but its size is often unexpected.
+
+For ``\Delta\Delta C_t`` or Pfaffl ratios, the error grows with ``\Delta C_t`` instead of ``C_t``, so it is smaller, but it does not disappear. Also, these methods use the efficiency as a fixed number (often 100%), so its uncertainty is not part of the reported result.
+
+### The uncertainty is reported, not ignored
+
+The Birch model does not take the efficiency from a separate calibration curve. The drop in per-cycle efficiency along the curve is set by ``b`` and ``t_m``, which are fitted on the same curve as ``x_0``. [`get_stderrors`](@ref) propagates their covariance to ``\ln x_0`` by the delta method, so the standard error of ``\ln x_0`` includes the uncertainty of the efficiency profile of that curve.
+
+On `dil4reps94` [Ruijter2013](@cite), this standard error, combined with the Poisson sampling of the ``N`` template molecules (standard deviation ``1/\sqrt{N}`` on the log scale), explains the spread between the replicates:
+
+| Molecules | SD of ``\ln x_0`` between replicates | Median standard error from the fit | Poisson, ``1/\sqrt{N}`` | Both combined |
+|---|---|---|---|---|
+| 15,000 | 0.063 | 0.052 | 0.008 | 0.053 |
+| 1,500 | 0.056 | 0.049 | 0.026 | 0.056 |
+| 150 | 0.095 | 0.041 | 0.082 | 0.091 |
+| 15 | 0.280 | 0.037 | 0.258 | 0.261 |
 
 ## Derivation of the Birch model
 
@@ -71,7 +103,7 @@ Dividing the numerator and denominator by ``k_1`` and setting
 b = \frac{k_2}{k_1} - 1
 ```
 
-gives the **Birch** growth equation (Birch, *Ann. Bot.* 1999):
+gives the **Birch** growth equation [Birch1999](@cite):
 
 ```math
 \boxed{\frac{dn}{dc} = \frac{a n (K - n)}{K + b n}}
@@ -133,11 +165,11 @@ For each cycle, the equation is solved for ``\ln x`` with a safeguarded Newton s
 
 * **Initial quantity** ``x_0 = n_0/K``, obtained by solving the implicit equation at ``c = 0`` (`get_x0`, `get_logx0`). It is the ratio of initial template strands to the total primer + template pool, and it is directly comparable between wells that share the same master mix.
 * **Inflection point**: ``x_i = 1/\left(1 + \sqrt{1 + b}\right)``. This is ``1/2`` for the logistic case and lower for ``b \gt 0``.
-* **Cy₀** (Guescini et al., *BMC Bioinformatics* 2008): the intersection of the tangent at the inflection point with the baseline (`get_cy0`).
+* **Cy₀** [Guescini2008](@cite): the intersection of the tangent at the inflection point with the baseline (`get_cy0`).
 
 ## Comparison on real data
 
-The figures below use the `dil4reps94` dataset: four 10-fold dilutions, from 15,000 down to 15 molecules, with 94 replicates each. They are made by `examples/figures.jl`.
+The figures below use the `dil4reps94` dataset [Ruijter2013](@cite), as distributed with the qpcR package [RitzSpiess2008](@cite): four 10-fold dilutions, from 15,000 down to 15 molecules, with 94 replicates each. They are made by `examples/figures.jl`.
 
 ### Fit of one typical curve
 
@@ -158,7 +190,7 @@ If ``x_0`` is estimated correctly, ``\log_{10} x_0`` against ``\log_{10}`` of th
 
 ### Why the Richards model fails
 
-The Birch and Richards (5PL) curves both add one shape parameter to the logistic curve, but in different ways (Birch 1999 compares the two equations). The Richards curve used here, ``x = \left(1 + e^{-a(c - t_m)}\right)^{-1/\nu}`` with ``\nu \gt 0``, solves
+The Birch and Richards (5PL) curves both add one shape parameter to the logistic curve, but in different ways ([Birch1999](@citet) compares the two equations). The Richards curve used here, ``x = \left(1 + e^{-a(c - t_m)}\right)^{-1/\nu}`` with ``\nu \gt 0``, solves
 
 ```math
 \frac{dx}{dc} = \frac{a}{\nu} x (1 - x^\nu).
@@ -180,7 +212,5 @@ On a log scale, the Birch curve is a straight line with slope ``\log_{10} 2`` pe
 
 ## References
 
-* Birch, C. P. D. (1999). A new generalized logistic sigmoid growth equation compared with the Richards growth equation. *Annals of Botany* 83, 713–723.
-* Boggy, G. J. & Woolf, P. J. (2010). A mechanistic model of PCR for accurate quantification of quantitative PCR data. *PLoS ONE* 5, e12355.
-* Guescini, M. et al. (2008). A new real-time PCR method to overcome significant quantitative inaccuracy due to slight amplification inhibition. *BMC Bioinformatics* 9, 326.
-* Ritz, C. & Spiess, A.-N. (2008). qpcR: an R package for sigmoidal model selection in quantitative real-time polymerase chain reaction analysis. *Bioinformatics* 24, 1549–1551.
+```@bibliography
+```

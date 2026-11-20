@@ -1,9 +1,13 @@
 using qPCRModels
 using Documenter
+using DocumenterCitations
+
+bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"); style = :authoryear)
 
 DocMeta.setdocmeta!(qPCRModels, :DocTestSetup, :(using qPCRModels); recursive = true)
 
 makedocs(;
+    plugins = [bib],
     checkdocs = :exports,
     modules = [qPCRModels],
     authors = "Geoffrey Schivre",
